@@ -6,7 +6,7 @@ import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from statistics import median
+from statistics import mean, median, stdev
 from typing import Any
 
 from scipy.stats import mannwhitneyu
@@ -20,15 +20,6 @@ logger = logging.getLogger(__name__)
 g_step_fit_threshold: float = DEFAULT_STEP_FIT_THRESHOLD
 g_p_value_threshold: float = DEFAULT_P_VALUE_THRESHOLD
 g_frame_time_target_ms: float = DEFAULT_FRAME_TIME_TARGET_MS
-
-@dataclass
-class BenchmarkCompareResult:
-    minimum: tuple[float, float]
-    maximum: tuple[float, float]
-    median: tuple[float, float]
-    metric: str
-    iterations: int
-    result: Any
 
 
 @dataclass
@@ -44,11 +35,72 @@ class Device:
 
 @dataclass
 class Metric:
-    minimum: float
-    maximum: float
-    median: float
-    coefficient_of_variation: float
-    runs: list[float]
+    # Easier printing
+    name: str
+    name_short: str
+    unit: str
+
+    _runs: list[float]
+
+    # Cached values (not in __init__)
+    _min   : float | None = field(init=False, default=None)
+    _max   : float | None = field(init=False, default=None)
+    _median: float | None = field(init=False, default=None)
+    _stdev : float | None = field(init=False, default=None)
+
+    @property
+    def runs(self) -> list[float]:
+        return self._runs
+
+    @runs.setter
+    def runs(self, value: list[float]):
+        self._runs = value
+        self._min = None
+        self._max = None
+        self._median = None
+        self._stdev = None
+
+    def min(self) -> float:
+        if len(self._runs) < 1:
+            return float("nan")
+        if self._min is None:
+            self._min = min(self._runs)
+        return self._min
+
+    def max(self) -> float:
+        if len(self._runs) < 1:
+            return float("nan")
+        if self._max is None:
+            self._max = max(self._runs)
+        return self._max
+
+    def median(self) -> float:
+        if len(self._runs) < 1:
+            return float("nan")
+        if self._median is None:
+            self._median = median(self._runs)
+        return self._median
+
+    def mean(self) -> float:
+        if len(self._runs) < 1:
+            return float("nan")
+        if self._mean is None:
+            self._mean = mean(self._runs)
+        return self._mean
+
+    def stdev(self) -> float:
+        if len(self._runs) < 2:
+            return float("nan")
+        if self._stdev is None:
+            self._stdev = stdev(self._runs)
+        return self._stdev
+
+    def cv(self) -> float:
+        if len(self._runs) < 2:
+            return float("nan")
+        if self.median() == 0:
+            return float("nan")
+        return self.stdev() / self.median()
 
 
 @dataclass
@@ -91,6 +143,16 @@ class FrameTimingMetric:
     # negative numbers indicate how much faster than the deadline a frame was.
     frame_overrun_ms: SampledMetric | None
 
+    def calc_freeze_frame_duration_ms(self, target: float) -> list[float]:
+        result: list[float] = []
+        for run in self.frame_duration_ms.runs:
+            freeze_ms: float = 0.0
+            for ft in run:
+                if ft > target:
+                    freeze_ms += ft - target
+            result.append(freeze_ms)
+        return result
+
 class MemoryMetricMode(Enum):
     UNKNOWN = 0
     LAST = 1
@@ -125,6 +187,23 @@ class Benchmark:
     data: StartupTimingMetric | FrameTimingMetric | MemoryUsageMetric | None
 
 
+class Verdict(Enum):
+    NOT_SIGNIFICANT = 0
+    IMPROVEMENT = 1
+    REGRESSION = 2
+
+
+@dataclass
+class BenchmarkCompareResult:
+    a_bench_ref: Benchmark
+    b_bench_ref: Benchmark
+    a_metric: Metric
+    b_metric: Metric
+    method: str
+    verdict: Verdict
+    result: Any
+
+
 @dataclass
 class BenchmarkReport:
     device: Device = field(default_factory=Device)
@@ -145,13 +224,12 @@ def parse_macrobechmark_report(path: Path | str) -> BenchmarkReport | None:
             emulated=True
         )
 
-    def parse_metric(data: dict[str, Any]) -> Metric:
+    def parse_metric(data: dict[str, Any], name: str, name_short: str, unit: str) -> Metric:
         return Metric(
-            minimum=data.get("minimum", 0.0),
-            maximum=data.get("maximum", 0.0),
-            median=data.get("median", 0.0),
-            coefficient_of_variation=data.get("coefficientOfVariation", 0.0),
-            runs=data.get("runs", []),
+            _runs=data.get("runs", []),
+            name=name,
+            name_short=name_short,
+            unit=unit,
         )
 
     def parse_sampled_metric(data: dict[str, Any]) -> SampledMetric:
@@ -168,10 +246,20 @@ def parse_macrobechmark_report(path: Path | str) -> BenchmarkReport | None:
         time_to_full_display_ms: Metric | None = None
 
         if "timeToFullDisplayMs" in metrics:
-            time_to_full_display_ms = parse_metric(metrics.get("timeToFullDisplayMs"))
+            time_to_full_display_ms = parse_metric(
+                metrics.get("timeToFullDisplayMs"),
+                name="Time to Full Display",
+                name_short="TFD",
+                unit="ms"
+            )
 
         return StartupTimingMetric(
-            time_to_initial_display_ms=parse_metric(metrics["timeToInitialDisplayMs"]),
+            time_to_initial_display_ms=parse_metric(
+                metrics["timeToInitialDisplayMs"],
+                name="Time to Initial Display",
+                name_short="TID",
+                unit="ms"
+            ),
             time_to_full_display_ms=time_to_full_display_ms,
         )
 
@@ -184,7 +272,12 @@ def parse_macrobechmark_report(path: Path | str) -> BenchmarkReport | None:
             frame_overrun_ms = parse_sampled_metric(sampled_metrics.get("frameOverrunMs"))
 
         return FrameTimingMetric(
-            frame_count=parse_metric(metrics.get("frameCount", {})),
+            frame_count=parse_metric(
+                metrics.get("frameCount", {}),
+                name="Frame Count",
+                name_short="FC",
+                unit=""
+            ),
             frame_duration_ms=parse_sampled_metric(sampled_metrics.get("frameDurationCpuMs", {})),
             frame_overrun_ms=frame_overrun_ms,
         )
@@ -200,25 +293,65 @@ def parse_macrobechmark_report(path: Path | str) -> BenchmarkReport | None:
 
         if "memoryRssAnonMaxKb" in metrics:
             memory_mode = MemoryMetricMode.MAX
-            memory_rss_anon_kb = parse_metric(metrics.get("memoryRssAnonMaxKb"))
+            memory_rss_anon_kb = parse_metric(
+                metrics.get("memoryRssAnonMaxKb"),
+                name="Memory Resident Set Size Anonymous Max",
+                name_short="MEM_RSS_ANON_MAX",
+                unit="Kb"
+            )
         elif "memoryRssAnonLastKb":
             memory_mode = MemoryMetricMode.LAST
-            memory_rss_anon_kb = parse_metric(metrics.get("memoryRssAnonLastKb"))
+            memory_rss_anon_kb = parse_metric(
+                metrics.get("memoryRssAnonLastKb"),
+                name="Memory Resident Set Size Anonymous Last",
+                name_short="MEM_RSS_ANON_LAST",
+                unit="Kb"
+            )
 
         if "memoryRssFileMaxKb" in metrics:
-            memory_rss_file_kb = parse_metric(metrics.get("memoryRssFileMaxKb"))
+            memory_rss_file_kb = parse_metric(
+                metrics.get("memoryRssFileMaxKb"),
+                name="Memory Resident Set Size File Max",
+                name_short="MEM_RSS_FILE_MAX",
+                unit="Kb"
+            )
         elif "memoryRssFileLastKb":
-            memory_rss_file_kb = parse_metric(metrics.get("memoryRssFileLastKb"))
+            memory_rss_file_kb = parse_metric(
+                metrics.get("memoryRssFileLastKb"),
+                name="Memory Resident Set Size File Last",
+                name_short="MEM_RSS_FILE_Last",
+                unit="Kb"
+            )
 
         if "memoryHeapSizeMaxKb" in metrics:
-            memory_heap_size_kb = parse_metric(metrics.get("memoryHeapSizeMaxKb"))
+            memory_heap_size_kb = parse_metric(
+                metrics.get("memoryHeapSizeMaxKb"),
+                name="Memory Heap Size Max",
+                name_short="MEM_HEAP_SIZE_MAX",
+                unit="Kb"
+            )
         elif "memoryHeapSizeLastKb":
-            memory_heap_size_kb = parse_metric(metrics.get("memoryHeapSizeLastKb"))
+            memory_heap_size_kb = parse_metric(
+                metrics.get("memoryHeapSizeLastKb"),
+                name="Memory Heap Size LAST",
+                name_short="MEM_HEAP_SIZE_LAST",
+                unit="Kb"
+            )
 
         if "memoryGpuMaxKb" in metrics:
-            memory_gpu_kb = parse_metric(metrics.get("memoryGpuMaxKb"))
+            memory_gpu_kb = parse_metric(
+                metrics.get("memoryGpuMaxKb"),
+                name="Memory GPU Max",
+                name_short="MEM_GPU_MAX",
+                unit="Kb"
+            )
         elif "memoryGpuLastKb" in metrics:
-            memory_gpu_kb = parse_metric(metrics.get("memoryGpuLastKb"))
+            memory_gpu_kb = parse_metric(
+                metrics.get("memoryGpuLastKb"),
+                name="Memory GPU Last",
+                name_short="MEM_GPU_LAST",
+                unit="Kb"
+            )
 
         if (
             memory_rss_anon_kb is None
@@ -287,91 +420,129 @@ def parse_macrobechmark_report(path: Path | str) -> BenchmarkReport | None:
     return report
 
 
-def step_fit(a, b) -> float:
-    def sum_squared_error(values):
-        avg = sum(values) / len(values)
-        return sum((v - avg) ** 2 for v in values)
+def compare_benchmark(
+    a: Benchmark,
+    b: Benchmark,
+    method: str,
+    threshold: float,
+    frametime_target: float = DEFAULT_FRAME_TIME_TARGET_MS,
+    *args,
+    **kwargs,
+) -> BenchmarkCompareResult | None:
+    def step_fit(a: list[float], b: list[float]) -> float:
+        def sum_squared_error(values):
+            avg = sum(values) / len(values)
+            return sum((v - avg) ** 2 for v in values)
+        if not a or not b:
+            return 0.0
+        total_squared_error = sum_squared_error(a) + sum_squared_error(b)
+        step_error = math.sqrt(total_squared_error) / (len(a) + len(b))
+        if step_error == 0.0:
+            return 0.0
+        return (sum(a) / len(a) - sum(b) / len(b)) / step_error
 
-    if not a or not b:
-        return 0.0
+    assert a.name == b.name
 
-    total_squared_error = sum_squared_error(a) + sum_squared_error(b)
-    step_error = math.sqrt(total_squared_error) / (len(a) + len(b))
-    if step_error == 0.0:
-        return 0.0
+    if a.repeat_iterations != b.repeat_iterations:
+        logger.warning(f"benchmark '{a.name}' iteration mismatch, (a: {a.repeat_iterations}, b: {b.repeat_iterations})")
 
-    return (sum(a) / len(a) - sum(b) / len(b)) / step_error
-
-
-def calculate_total_freeze_time_ms(frame_times: list[float], frame_time_target: float) -> float:
-    total_freeze_ms: float = 0.0
-    for ft in frame_times:
-        if ft > frame_time_target:
-            total_freeze_ms += ft - frame_time_target
-    return total_freeze_ms
-
-
-def compare_benchmark(a: Benchmark, b: Benchmark, compare_func, *args, **kwargs) -> BenchmarkCompareResult | None:
-    compare_result = None
-
-    a_values: list[float] = []
-    b_values: list[float] = []
-    v_minimum: tuple[float, float] = (0.0, 0.0)
-    v_maximum: tuple[float, float] = (0.0, 0.0)
-    v_median:  tuple[float, float] = (0.0, 0.0)
-    metric: str = ""
+    a_metric: Metric
+    b_metric: Metric
     if isinstance(a.data, StartupTimingMetric) and isinstance(b.data, StartupTimingMetric):
-        metric = "TID"
-
-        a_values = a.data.time_to_initial_display_ms.runs
-        b_values = b.data.time_to_initial_display_ms.runs
-
-        v_minimum = (
-            a.data.time_to_initial_display_ms.minimum,
-            b.data.time_to_initial_display_ms.minimum,
-        )
-        v_maximum = (
-            a.data.time_to_initial_display_ms.maximum,
-            b.data.time_to_initial_display_ms.maximum,
-        )
-        v_median = (
-            a.data.time_to_initial_display_ms.median,
-            b.data.time_to_initial_display_ms.median,
-        )
+        a_metric = a.data.time_to_initial_display_ms
+        b_metric = b.data.time_to_initial_display_ms
     elif isinstance(a.data, FrameTimingMetric) and isinstance(b.data, FrameTimingMetric):
-        metric = "FFT"
+        metric_name = "Freeze Frame Duration"
+        metric_name_short = "FFD"
+        metric_unit = "ms"
 
-        a_values = [ calculate_total_freeze_time_ms(run, g_frame_time_target_ms) for run in a.data.frame_duration_ms.runs ]
-        b_values = [ calculate_total_freeze_time_ms(run, g_frame_time_target_ms) for run in b.data.frame_duration_ms.runs ]
-
-        v_minimum = (min(a_values), min(b_values))
-        v_maximum = (max(a_values), max(b_values))
-        v_median  = (median(a_values), median(b_values))
+        a_metric = Metric(
+            _runs=a.data.calc_freeze_frame_duration_ms(frametime_target),
+            name=metric_name,
+            name_short=metric_name_short,
+            unit=metric_unit,
+        )
+        b_metric = Metric(
+            _runs=b.data.calc_freeze_frame_duration_ms(frametime_target),
+            name=metric_name,
+            name_short=metric_name_short,
+            unit=metric_unit,
+        )
     elif isinstance(a.data, MemoryUsageMetric) and isinstance(b.data, MemoryUsageMetric):
-        metric = "MEMU"
+        metric_name = "Total Memory Usage"
+        metric_name_short = "MEMU"
+        metric_unit = "Kb"
 
-        a_values = a.data.memory_rss_anon_kb.runs + a.data.memory_rss_file_kb.runs
-        b_values = b.data.memory_rss_anon_kb.runs + b.data.memory_rss_file_kb.runs
-
-        v_minimum = (min(a_values), min(b_values))
-        v_maximum = (max(a_values), max(b_values))
-        v_median  = (median(a_values), median(b_values))
+        a_metric = Metric(
+            _runs=a.data.memory_rss_anon_kb.runs + a.data.memory_rss_file_kb.runs,
+            name=metric_name,
+            name_short=metric_name_short,
+            unit=metric_unit,
+        )
+        b_metric = Metric(
+            _runs=b.data.memory_rss_anon_kb.runs + b.data.memory_rss_file_kb.runs,
+            name=metric_name,
+            name_short=metric_name_short,
+            unit=metric_unit,
+        )
     else:
         logger.warning(f"benchmark '{a.name}' type mismatch or unknown, skipping. (a_type: {type(a.data)}, b_type: {type(b.data)})")
         return None
 
+    verdict: Verdict = Verdict.NOT_SIGNIFICANT
+    compare_result = None
     try:
-        compare_result = compare_func(a_values, b_values, *args, **kwargs)
+        match method:
+            case "stepfit":
+                compare_result = step_fit(a_metric.runs, b_metric.runs, *args, **kwargs)
+                if abs(compare_result) < threshold:
+                    verdict = Verdict.NOT_SIGNIFICANT
+                elif compare_result < 0:
+                    verdict = Verdict.REGRESSION
+                else:
+                    verdict = Verdict.IMPROVEMENT
+            case "mannwhitneyu":
+                res_less = mannwhitneyu(
+                    a_metric.runs,
+                    b_metric.runs,
+                    alternative="less",
+                    method="exact",
+                    *args,
+                    **kwargs,
+                )
+                res_greater = mannwhitneyu(
+                    a_metric.runs,
+                    b_metric.runs,
+                    alternative="greater",
+                    method="exact",
+                    *args,
+                    **kwargs,
+                )
+                if (res_less.pvalue < threshold) and (res_greater.pvalue < threshold):
+                    compare_result = min(res_less.pvalue, res_greater.pvalue)
+                    verdict = Verdict.NOT_SIGNIFICANT
+                elif res_less.pvalue < threshold:
+                    compare_result = res_less.pvalue
+                    verdict = Verdict.REGRESSION
+                elif res_greater.pvalue < threshold:
+                    compare_result = res_greater.pvalue
+                    verdict = Verdict.IMPROVEMENT
+                else:
+                    verdict = Verdict.NOT_SIGNIFICANT
+                    compare_result = min(res_less.pvalue, res_greater.pvalue)
+            case _:
+                assert False, "Unknown compare function"
     except Exception as e:
-        logger.warning(f"failed to compare benchmark '{a.name}' metric '{metric}', skipping. ({e})'")
+        logger.warning(f"failed to compare benchmark '{a.name}' metric '{a_metric.name}', skipping. ({e})'")
         return None
 
     return BenchmarkCompareResult(
-        minimum=v_minimum,
-        maximum=v_maximum,
-        median=v_median,
-        metric=metric,
-        iterations=a.repeat_iterations,
+        a_bench_ref=a,
+        b_bench_ref=b,
+        a_metric=a_metric,
+        b_metric=b_metric,
+        verdict=verdict,
+        method=method,
         result=compare_result,
     )
 
@@ -386,104 +557,139 @@ def print_device_specifications(device: Device) -> None:
     print(f"  Emulator : {device.emulated}")
 
 
-def print_step_fit_statistics(statistics: dict[str, BenchmarkCompareResult]) -> None:
-    NAME_WIDTH: int = 40
-    ITER_WIDTH: int = 3
-    VERDICT_WIDTH: int = 7
-    METRIC_WIDTH: int = 6
-    STAT_WIDTH: int = 28
-    NUM_WIDTH: int = 27
-    METRIC_UNIT: dict[str, str] = {"TID": "ms", "FFT": "ms", "MEMU": "Kb"}
+@dataclass
+class TableFormatterConfig:
+    field_width_name: int = 40
+    field_width_iteration: int = 3
+    field_width_metric: int = 6
+    field_width_metric_value: int = 35
+    field_width_number: int = 25
 
-    header = (
-        f"{'Benchmark:Iterations':<{NAME_WIDTH}} | "
-        f"{'Metric':<{METRIC_WIDTH}} | "
-        f"{'Verdict':<{VERDICT_WIDTH}} | "
-        f"{f'Statistic (Threshold: {g_step_fit_threshold})':<{STAT_WIDTH}} | "
-        f"{'Minimum':<{NUM_WIDTH}} | "
-        f"{'Maximum':<{NUM_WIDTH}} | "
-        f"{'Median':<{NUM_WIDTH}}"
-    )
 
-    print("Compare Function: Step fit")
-    print(header)
-    print("-" * len(header))
+class TableFormatter():
+    statistics: list[BenchmarkCompareResult]
+    state_str: str
+    title: str | None
+    config: TableFormatterConfig
 
-    regression_count: int = 0
-    for name, result in statistics.items():
-        verdict: str = ""
-        if abs(result.result) <= g_step_fit_threshold:
-            verdict = "Noise"
-        elif result.result < 0:
-            verdict = "Regress"
-            regression_count += 1
-        else:
-            verdict = "Improve"
+    _COL_LABEL_BENCHMARK : str = "Benchmark:Iterations"
+    _COL_LABEL_METRIC    : str = "Metric"
+    _COL_LABEL_MINIMUM   : str = "Minimum"
+    _COL_LABEL_MEDIAN    : str = "Median"
+    _COL_LABEL_MAXIMUM   : str = "Maximum"
+    _COL_LABEL_STDEV     : str = "Standard Deviation"
 
-        display_name = name[:NAME_WIDTH-ITER_WIDTH] + f":{result.iterations}"
-        row = (
-            f"{display_name:<{NAME_WIDTH}} | "
-            f"{result.metric:<{METRIC_WIDTH}} | "
-            f"{verdict:<{VERDICT_WIDTH}} | "
-            f"{f'fit: {result.result:.3f}':<{STAT_WIDTH}} | "
-            f"{f'{result.minimum[0]:.3f}{METRIC_UNIT[result.metric]} ~ {result.minimum[1]:.3f}{METRIC_UNIT[result.metric]}':<{NUM_WIDTH}} | "
-            f"{f'{result.maximum[0]:.3f}{METRIC_UNIT[result.metric]} ~ {result.maximum[1]:.3f}{METRIC_UNIT[result.metric]}':<{NUM_WIDTH}} | "
-            f"{f'{result.median[0]:.3f}{METRIC_UNIT[result.metric]} ~ {result.median[1]:.3f}{METRIC_UNIT[result.metric]}':<{NUM_WIDTH}}"
+    _col_width_iteration    : int
+    _col_width_benchmark    : int
+    _col_width_metric       : int
+    _col_width_metric_value : int
+    _col_width_number       : int
+
+    def __init__(
+        self,
+        statistics: list[BenchmarkCompareResult],
+        state_str: str,
+        title: str | None = None,
+        formatter_conf: TableFormatterConfig=TableFormatterConfig(),
+    ) -> None:
+        self.statistics = statistics
+        self.state_str = state_str
+        self.title = title
+        self.config = formatter_conf
+
+        self._compute_column_widths()
+
+    def print(self) -> None:
+        header = self._build_header()
+        line = "-" * len(header)
+
+        print(line)
+        if self.title:
+            print(self.title.center(len(header)))
+            print(line)
+
+        print(header)
+        print(line)
+
+        for stat in self.statistics:
+            print(self._build_row(stat))
+
+        print(line)
+        regressions = [ r.a_bench_ref.name for r in self.statistics if r.verdict == Verdict.REGRESSION ]
+        print(f"Regressions ({len(regressions)}): {regressions}")
+        print()
+
+    def _build_header(self):
+        return " | ".join(
+            [
+                self._format_col(self._COL_LABEL_BENCHMARK, self._col_width_benchmark),
+                self._format_col(self._COL_LABEL_METRIC, self._col_width_metric),
+                self._format_col(self._COL_LABEL_MEDIAN, self._col_width_metric_value),
+                self._format_col(self._COL_LABEL_MINIMUM, self._col_width_number),
+                self._format_col(self._COL_LABEL_MAXIMUM, self._col_width_number),
+                self._format_col(self._COL_LABEL_STDEV, self._col_width_number),
+            ]
         )
-        print(row)
 
-    print("-" * len(header))
-    print(f"Regressions: {regression_count}")
-
-
-def print_mannwhitneyu_statistics(statistics: dict[str, BenchmarkCompareResult]) -> None:
-    NAME_WIDTH: int = 40
-    ITER_WIDTH: int = 3
-    VERDICT_WIDTH: int = 7
-    METRIC_WIDTH: int = 6
-    STAT_WIDTH: int = 35
-    NUM_WIDTH: int = 27
-    METRIC_UNIT: dict[str, str] = {"TID": "ms", "FFT": "ms", "MEMU": "Kb"}
-
-    header = (
-        f"{'Benchmark:Iterations':<{NAME_WIDTH}} | "
-        f"{'Metric':<{METRIC_WIDTH}} | "
-        f"{'Verdict':<{VERDICT_WIDTH}} | "
-        f"{f'Statistic (pvalue Threshold: {g_p_value_threshold:.3f})':<{STAT_WIDTH}} | "
-        f"{'Minimum':<{NUM_WIDTH}} | "
-        f"{'Maximum':<{NUM_WIDTH}} | "
-        f"{'Median':<{NUM_WIDTH}}"
-    )
-
-    print("Compare Function: Mann-Whitney's U-test")
-    print(header)
-    print("-" * len(header))
-
-    regression_count: int = 0
-    for name, result in statistics.items():
-        r = result.result
-
-        verdict: str = ""
-        if r.pvalue < g_p_value_threshold:
-            verdict = "Regress"
-            regression_count += 1
-        else:
-            verdict = "Noise"
-
-        display_name = name[:NAME_WIDTH-ITER_WIDTH] + f":{result.iterations}"
-        row = (
-            f"{display_name:<{NAME_WIDTH}} | "
-            f"{result.metric:<{METRIC_WIDTH}} | "
-            f"{verdict:<{VERDICT_WIDTH}} | "
-            f"{f'pvalue: {r.pvalue:.3f}, stat: {r.statistic:.3f}':<{STAT_WIDTH}} | "
-            f"{f'{result.minimum[0]:.3f}{METRIC_UNIT[result.metric]} ~ {result.minimum[1]:.3f}{METRIC_UNIT[result.metric]}':<{NUM_WIDTH}} | "
-            f"{f'{result.maximum[0]:.3f}{METRIC_UNIT[result.metric]} ~ {result.maximum[1]:.3f}{METRIC_UNIT[result.metric]}':<{NUM_WIDTH}} | "
-            f"{f'{result.median[0]:.3f}{METRIC_UNIT[result.metric]} ~ {result.median[1]:.3f}{METRIC_UNIT[result.metric]}':<{NUM_WIDTH}}"
+    def _build_row(self, r: BenchmarkCompareResult) -> str:
+        benchmark_col = self._build_benchmark_name(r)
+        metric_col = self._format_col(r.a_metric.name_short, self._col_width_metric)
+        median_col = self._build_range(
+            r.a_metric.median(),
+            r.b_metric.median(),
+            infix=self._verdict_symbol(r.verdict),
+            suffix=f"({self.state_str}={r.result:.3f})",
+            unit=r.a_metric.unit,
+            width=self._col_width_metric_value,
         )
-        print(row)
+        min_col = self._build_range(r.a_metric.min(), r.b_metric.min(), unit=r.a_metric.unit)
+        max_col = self._build_range(r.a_metric.max(), r.b_metric.max(), unit=r.a_metric.unit)
+        stdev_col = self._build_range(r.a_metric.stdev(), r.b_metric.stdev(), unit=r.a_metric.unit)
+        return " | ".join([benchmark_col, metric_col, median_col, min_col, max_col, stdev_col])
 
-    print("-" * len(header))
-    print(f"Regressions: {regression_count}")
+    def _build_range(
+        self,
+        a: float,
+        b: float,
+        *,
+        infix: str = "-",
+        suffix: str = "",
+        unit: str = "",
+        width: int | None = None,
+    ) -> str:
+        width = width or self._col_width_number
+        main = f"{a:.3f}{unit} {infix} {b:.3f}{unit}"
+
+        if not suffix:
+            return self._format_col(main, width)
+
+        space_for_main = width - len(suffix) - 1
+        return f"{main:<{space_for_main}} {suffix}"
+
+    def _build_benchmark_name(self, r: BenchmarkCompareResult) -> str:
+        name_width = self._col_width_benchmark - self._col_width_iteration
+        name = r.a_bench_ref.name[:name_width]
+        return self._format_col(
+            f"{name}:{r.a_bench_ref.repeat_iterations}",
+            self._col_width_benchmark,
+        )
+
+    def _format_col(self, value: str, width: int) -> str:
+        return f"{value:<{width}}"
+
+    def _verdict_symbol(self, verdict: Verdict) -> str:
+        return {
+            Verdict.NOT_SIGNIFICANT: "~",
+            Verdict.IMPROVEMENT: "<",
+            Verdict.REGRESSION: ">",
+        }.get(verdict, "-")
+
+    def _compute_column_widths(self) -> None:
+        self._col_width_iteration = self.config.field_width_iteration
+        self._col_width_benchmark = (max(len(self._COL_LABEL_BENCHMARK), self.config.field_width_name) + self._col_width_iteration)
+        self._col_width_metric = max(len(self._COL_LABEL_METRIC), self.config.field_width_metric)
+        self._col_width_metric_value = max(len(self._COL_LABEL_MEDIAN), self.config.field_width_metric_value )
+        self._col_width_number = max(len(self._COL_LABEL_MINIMUM), self.config.field_width_number)
 
 
 def parse_commandline_args() -> argparse.Namespace:
@@ -606,8 +812,18 @@ def main() -> int:
             print_device_specifications(baseline_report.device)
         print()
 
-        step_fit_statistics: dict[str, BenchmarkCompareResult] = {}
-        mannwhitneyu_statistics: dict[str, BenchmarkCompareResult] = {}
+        statistics: dict[str, Any]= {
+            "stepfit": {
+                "header": "Step Fit",
+                "state": "fit",
+                "results": [],
+            },
+            "mannwhitneyu": {
+                "header": "Mann-Whitney U test",
+                "state": "pval",
+                "results": [],
+            },
+        }
         for name, candidate_benchmark in candidate_report.benchmarks.items():
             baseline_benchmark: Benchmark | None = baseline_report.benchmarks.get(name)
             if baseline_benchmark is None:
@@ -615,9 +831,14 @@ def main() -> int:
                 continue
 
             # Step Fit
-            result = compare_benchmark(baseline_benchmark, candidate_benchmark, step_fit)
+            result = compare_benchmark(
+                baseline_benchmark,
+                candidate_benchmark,
+                method="stepfit",
+                threshold=g_step_fit_threshold,
+            )
             if result is not None:
-                step_fit_statistics[name] = result
+                statistics["stepfit"]["results"].append(result)
             else:
                 logger.warning(f"couldn't compare 'Step Fit' benchmark '{name}', skipping")
 
@@ -625,18 +846,16 @@ def main() -> int:
             result = compare_benchmark(
                 baseline_benchmark,
                 candidate_benchmark,
-                mannwhitneyu,
-                alternative="less",
-                method="exact"
+                method="mannwhitneyu",
+                threshold=g_p_value_threshold
             )
             if result is not None:
-                mannwhitneyu_statistics[name] = result
+                statistics["mannwhitneyu"]["results"].append(result)
             else:
                 logger.warning(f"couldn't compare 'Mann-Whitney's U-test' benchmark '{name}', skipping")
 
-        print_step_fit_statistics(step_fit_statistics)
-        print()
-        print_mannwhitneyu_statistics(mannwhitneyu_statistics)
+        for _, v in statistics.items():
+            TableFormatter(v["results"], state_str=v["state"], title=v["header"]).print()
 
     return 0
 
