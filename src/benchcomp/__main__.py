@@ -1,5 +1,6 @@
 import argparse
 import json
+import logging
 import math
 import sys
 from dataclasses import dataclass, field
@@ -14,11 +15,11 @@ DEFAULT_STEP_FIT_THRESHOLD: float = 25.0
 DEFAULT_P_VALUE_THRESHOLD: float = 0.01
 DEFAULT_FRAME_TIME_TARGET_MS: float = 1000 / 60
 
+logger = logging.getLogger(__name__)
 
 g_step_fit_threshold: float = DEFAULT_STEP_FIT_THRESHOLD
 g_p_value_threshold: float = DEFAULT_P_VALUE_THRESHOLD
 g_frame_time_target_ms: float = DEFAULT_FRAME_TIME_TARGET_MS
-
 
 @dataclass
 class BenchmarkCompareResult:
@@ -252,7 +253,7 @@ def parse_macrobechmark_report(path: Path | str) -> BenchmarkReport | None:
         elif "memoryRssAnonLastKb" in metrics_json:
             bench_data = parse_memory_usage_metric(data)
         else:
-            print(f"warn: unable to detect benchmark '{name}' metric type, skipping")
+            logger.warning(f"unable to detect benchmark '{name}' metric type, skipping")
             return None
 
         return Benchmark(
@@ -277,10 +278,10 @@ def parse_macrobechmark_report(path: Path | str) -> BenchmarkReport | None:
                         report.benchmarks[benchmark.name] = benchmark
                 except Exception as e:
                     name = bench_obj.get("name", "")
-                    print(f"warn: failed to parse benchmark '{name}', skipping. ({e})")
+                    logger.warning(f"failed to parse benchmark '{name}', skipping. ({e})")
 
         except json.JSONDecodeError | UnicodeDecodeError:
-            print(f"err: failed to parse json file '{path}', invalid JSON document")
+            logger.error(f"failed to parse json file '{path}', invalid JSON document")
             return None
 
     return report
@@ -356,13 +357,13 @@ def compare_benchmark(a: Benchmark, b: Benchmark, compare_func, *args, **kwargs)
         v_maximum = (max(a_values), max(b_values))
         v_median  = (median(a_values), median(b_values))
     else:
-        print(f"warn: benchmark '{a.name}' type mismatch or unknown, skipping. (a_type: {type(a.data)}, b_type: {type(b.data)})")
+        logger.warning(f"benchmark '{a.name}' type mismatch or unknown, skipping. (a_type: {type(a.data)}, b_type: {type(b.data)})")
         return None
 
     try:
         compare_result = compare_func(a_values, b_values, *args, **kwargs)
     except Exception as e:
-        print(f"warn: failed to compare benchmark '{a.name}' metric '{metric}', skipping. ({e})'")
+        logger.warning(f"failed to compare benchmark '{a.name}' metric '{metric}', skipping. ({e})'")
         return None
 
     return BenchmarkCompareResult(
@@ -549,16 +550,16 @@ def main() -> int:
     g_frame_time_target_ms =  args.frametime_target
 
     if len(baseline_files) <= 0:
-        print('ERR: baseline has no macrobenchmark results', file=sys.stderr)
+        logger.critical('baseline has no macrobenchmark results')
         return 1
 
     if len(candidate_files) <= 0:
-        print('ERR: candidate has no macrobenchmark results', file=sys.stderr)
+        logger.critical('candidate has no macrobenchmark results')
         return 1
 
     min_len = min(len(baseline_files), len(candidate_files))
     if len(baseline_files) != len(candidate_files):
-        print(f"WARN: Length mismatch, using first {min_len} samples. baseline: {len(baseline_files)}, candidate: {len(candidate_files)}")
+        logger.warning(f"length mismatch, using first {min_len} samples. baseline: {len(baseline_files)}, candidate: {len(candidate_files)}")
 
     print('Macrobenchmark Result Mapping:')
     print('| Index | Baseline | Candidate |')
@@ -577,7 +578,7 @@ def main() -> int:
     print(f'# Match   : {min_len - mismatch_count}')
     print(f'# Mismatch: {mismatch_count}')
     if mismatch_count > 0:
-        print("WARN: filename mapping mismatch detected. Output prediction may be incorrect")
+        logger.warning("filename mapping mismatch detected. Output prediction may be incorrect")
     print()
 
     for i in range(min_len):
@@ -592,13 +593,11 @@ def main() -> int:
         baseline_report: BenchmarkReport | None = parse_macrobechmark_report(baseline_file)
         candidate_report: BenchmarkReport | None = parse_macrobechmark_report(candidate_file)
         if baseline_report is None or candidate_report is None:
-            print("err: invalid benchmark reports, skipping", file=sys.stderr)
-            print(f"  baseline: '{baseline_file}'", file=sys.stderr)
-            print(f"  candidate: '{candidate_file}'", file=sys.stderr)
+            logger.error(f"invalid benchmark reports, skipping.\n  baseline: '{baseline_file}',\n  candidate: '{candidate_file}'")
             continue
 
         if baseline_report.device != candidate_report.device:
-            print("warn: benchmark device mismatch")
+            logger.warning(f"benchmark device mismatch detected.\n  baseline: '{baseline_file}',\n  candidate: '{candidate_file}'")
             print("Baseline", end="")
             print_device_specifications(baseline_report.device)
             print("Candidate", end="")
@@ -612,7 +611,7 @@ def main() -> int:
         for name, candidate_benchmark in candidate_report.benchmarks.items():
             baseline_benchmark: Benchmark | None = baseline_report.benchmarks.get(name)
             if baseline_benchmark is None:
-                print(f"warn: baseline does not contain benchmark '{name}', skipping")
+                logger.warning(f"baseline does not contain benchmark '{name}', skipping")
                 continue
 
             # Step Fit
@@ -620,7 +619,7 @@ def main() -> int:
             if result is not None:
                 step_fit_statistics[name] = result
             else:
-                print(f"warn: couldn't compare 'Step Fit' benchmark '{name}', skipping")
+                logger.warning(f"couldn't compare 'Step Fit' benchmark '{name}', skipping")
 
             # Mann-Whitney's U-test
             result = compare_benchmark(
@@ -633,7 +632,7 @@ def main() -> int:
             if result is not None:
                 mannwhitneyu_statistics[name] = result
             else:
-                print(f"warn: couldn't compare 'Mann-Whitney's U-test' benchmark '{name}', skipping")
+                logger.warning(f"couldn't compare 'Mann-Whitney's U-test' benchmark '{name}', skipping")
 
         print_step_fit_statistics(step_fit_statistics)
         print()
