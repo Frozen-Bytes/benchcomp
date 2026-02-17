@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from statistics import median
-from typing import Any, List
+from typing import Any
 
 from scipy.stats import mannwhitneyu
 
@@ -47,7 +47,7 @@ class Metric:
     maximum: float
     median: float
     coefficient_of_variation: float
-    runs: List[float]
+    runs: list[float]
 
 
 @dataclass
@@ -56,7 +56,7 @@ class SampledMetric:
     p90: float
     p95: float
     p99: float
-    runs: List[List[float]]
+    runs: list[list[float]]
 
 
 @dataclass
@@ -91,9 +91,9 @@ class FrameTimingMetric:
     frame_overrun_ms: SampledMetric | None
 
 class MemoryMetricMode(Enum):
-    UNKNOWN = 0,
-    LAST = 1,
-    MAX = 2,
+    UNKNOWN = 0
+    LAST = 1
+    MAX = 2
 
 @dataclass
 class MemoryUsageMetric:
@@ -286,7 +286,7 @@ def parse_macrobechmark_report(path: Path | str) -> BenchmarkReport | None:
     return report
 
 
-def step_fit(a, b):
+def step_fit(a, b) -> float:
     def sum_squared_error(values):
         avg = sum(values) / len(values)
         return sum((v - avg) ** 2 for v in values)
@@ -302,7 +302,7 @@ def step_fit(a, b):
     return (sum(a) / len(a) - sum(b) / len(b)) / step_error
 
 
-def calculate_total_freeze_time_ms(frame_times: List[float], frame_time_target: float):
+def calculate_total_freeze_time_ms(frame_times: list[float], frame_time_target: float) -> float:
     total_freeze_ms: float = 0.0
     for ft in frame_times:
         if ft > frame_time_target:
@@ -313,8 +313,8 @@ def calculate_total_freeze_time_ms(frame_times: List[float], frame_time_target: 
 def compare_benchmark(a: Benchmark, b: Benchmark, compare_func, *args, **kwargs) -> BenchmarkCompareResult | None:
     compare_result = None
 
-    a_values: List[float] = []
-    b_values: List[float] = []
+    a_values: list[float] = []
+    b_values: list[float] = []
     v_minimum: tuple[float, float] = (0.0, 0.0)
     v_maximum: tuple[float, float] = (0.0, 0.0)
     v_median:  tuple[float, float] = (0.0, 0.0)
@@ -375,7 +375,7 @@ def compare_benchmark(a: Benchmark, b: Benchmark, compare_func, *args, **kwargs)
     )
 
 
-def print_device_specifications(device: Device):
+def print_device_specifications(device: Device) -> None:
     print(f"Device ({device.name}):")
     print(f"  Brand    : {device.brand}")
     print(f"  Model    : {device.model}")
@@ -385,7 +385,7 @@ def print_device_specifications(device: Device):
     print(f"  Emulator : {device.emulated}")
 
 
-def print_step_fit_statistics(statistics: dict[str, BenchmarkCompareResult]):
+def print_step_fit_statistics(statistics: dict[str, BenchmarkCompareResult]) -> None:
     NAME_WIDTH: int = 40
     ITER_WIDTH: int = 3
     VERDICT_WIDTH: int = 7
@@ -435,7 +435,7 @@ def print_step_fit_statistics(statistics: dict[str, BenchmarkCompareResult]):
     print(f"Regressions: {regression_count}")
 
 
-def print_mannwhitneyu_statistics(statistics: dict[str, BenchmarkCompareResult]):
+def print_mannwhitneyu_statistics(statistics: dict[str, BenchmarkCompareResult]) -> None:
     NAME_WIDTH: int = 40
     ITER_WIDTH: int = 3
     VERDICT_WIDTH: int = 7
@@ -532,7 +532,7 @@ def parse_commandline_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main():
+def main() -> int:
     args = parse_commandline_args()
 
     baseline_dir = Path(args.baseline_dir)
@@ -550,11 +550,11 @@ def main():
 
     if len(baseline_files) <= 0:
         print('ERR: baseline has no macrobenchmark results', file=sys.stderr)
-        exit(1)
+        return 1
 
     if len(candidate_files) <= 0:
         print('ERR: candidate has no macrobenchmark results', file=sys.stderr)
-        exit(1)
+        return 1
 
     min_len = min(len(baseline_files), len(candidate_files))
     if len(baseline_files) != len(candidate_files):
@@ -592,8 +592,10 @@ def main():
         baseline_report: BenchmarkReport | None = parse_macrobechmark_report(baseline_file)
         candidate_report: BenchmarkReport | None = parse_macrobechmark_report(candidate_file)
         if baseline_report is None or candidate_report is None:
-            print("err: invalid benchmark reports", file=sys.stderr)
-            exit(1)
+            print("err: invalid benchmark reports, skipping", file=sys.stderr)
+            print(f"  baseline: '{baseline_file}'", file=sys.stderr)
+            print(f"  candidate: '{candidate_file}'", file=sys.stderr)
+            continue
 
         if baseline_report.device != candidate_report.device:
             print("warn: benchmark device mismatch")
@@ -637,6 +639,8 @@ def main():
         print()
         print_mannwhitneyu_statistics(mannwhitneyu_statistics)
 
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
