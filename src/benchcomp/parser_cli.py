@@ -50,5 +50,12 @@ def parse_commandline_args() -> argparse.Namespace:
         metavar="VALUE",
         help=f"P-value threshold for Mann-Whitney U-test significance (Default: {DEFAULT_P_VALUE_THRESHOLD:.3f})",
     )
+    parser.add_argument(
+        "--verbose",
+        dest="verbose",
+        action="store_true",
+        default=False,
+        help="Print additional metric information"
+    )
 
     return parser.parse_args()

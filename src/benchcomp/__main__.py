@@ -1,5 +1,6 @@
 import logging
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,13 @@ from benchcomp.parser_macrobenchmark import parse_macrobechmark_report
 
 logger = logging.getLogger(__name__)
 
+@dataclass
+class CompareMethodStruct:
+    method_id: str
+    name: str
+    header: str
+    results: list[BenchmarkCompareResult]
+
 def print_device_specifications(device: Device) -> None:
     print(f"Device ({device.name}):")
     print(f"  Brand    : {device.brand}")
@@ -20,6 +28,44 @@ def print_device_specifications(device: Device) -> None:
     print(f"  Core Freq: {device.cpu_freq}Hz")
     print(f"  Memory   : {device.mem_size}MB")
     print(f"  Emulator : {device.emulated}")
+
+
+# TODO: This is bad
+def print_compare_method_results(cr_a: BenchmarkCompareResult, cr_b: BenchmarkCompareResult) -> None:
+    def to_seconds(time_ns: float):
+        return time_ns / (1000 * 1000 * 1000)
+
+    benchmark_name = cr_a.a_bench_ref.name
+    assert benchmark_name == cr_a.b_bench_ref.name
+
+    benchmark_class = cr_a.a_bench_ref.class_name
+    assert benchmark_class == cr_a.b_bench_ref.class_name
+
+    metric_name_long = cr_a.a_metric.name
+    assert metric_name_long == cr_a.b_metric.name
+
+    metric_name_short = cr_a.a_metric.name_short
+    assert metric_name_short == cr_a.b_metric.name_short
+
+    baseline_runs = ", ".join(f"{x:.3f}" for x in cr_a.a_metric.runs)
+    candidate_runs = ", ".join(f"{x:.3f}" for x in cr_a.b_metric.runs)
+
+    total_run_time_sec: float = to_seconds(
+        cr_a.a_bench_ref.total_run_time_ns + cr_a.a_bench_ref.total_run_time_ns
+    )
+    a_run_time_sec: float = to_seconds(cr_a.a_bench_ref.total_run_time_ns)
+    b_run_time_sec: float = to_seconds(cr_a.b_bench_ref.total_run_time_ns)
+
+    print(f"> Benchmark '{benchmark_name}':")
+    print(f"    Class               : {benchmark_class}")
+    print(f"    Total Run Time (s)  : {total_run_time_sec:.3f} (Baseline: {a_run_time_sec:.3f}, Candidate: {b_run_time_sec:.3f})")
+    print(f"    Warmup   Iterations : (Baseline: {cr_a.a_bench_ref.warmup_iterations}, Candidate: {cr_a.b_bench_ref.warmup_iterations})")
+    print(f"    Repeated Iterations : (Baseline: {cr_a.a_bench_ref.repeat_iterations}, Candidate: {cr_a.b_bench_ref.repeat_iterations})")
+    print(f"    Metric              : {metric_name_long} ({metric_name_short})")
+    print(f"    Baseline  Runs ({cr_a.a_metric.unit}) : [{baseline_runs}]")
+    print(f"    Candidate Runs ({cr_a.a_metric.unit}) : [{candidate_runs}]")
+    print(f"    Verdict             : ({cr_a.method}: {cr_a.verdict}, {cr_b.method}: {cr_b.verdict})")
+    print(f"    Statistic           : ({cr_a.method}: {cr_a.result:.3f}, {cr_b.method}: {cr_b.result:.3f})")
 
 
 def _tabulate(
@@ -122,6 +168,7 @@ def main() -> int:
     step_fit_threshold = args.step_fit_threshold
     alpha = args.pvalue_threshold
     frametime_target_ms =  args.frametime_target
+    is_verbose = args.verbose
 
     if len(baseline_files) <= 0:
         logger.critical('baseline has no macrobenchmark results')
@@ -200,8 +247,9 @@ def main() -> int:
                 logger.warning(f"baseline does not contain benchmark '{name}', skipping")
                 continue
 
+            results: list[BenchmarkCompareResult] = []
             for method, method_info in statistics.items():
-                result = compare_benchmark(
+                result: BenchmarkCompareResult | None = compare_benchmark(
                     baseline_benchmark,
                     candidate_benchmark,
                     method=method,
@@ -209,9 +257,19 @@ def main() -> int:
                     frametime_target=frametime_target_ms
                 )
                 if result is not None:
-                    statistics[method]["results"].append(result)
+                    results.append(result)
                 else:
                     logger.warning(f"couldn't compare '{method}' benchmark '{name}', skipping")
+
+            for result in results:
+                statistics[result.method]["results"].append(result)
+
+            # TODO: Verbose mode is hardcoded to support 2 methods (stepfit, and mannwhitneyu) only,
+            # if we add more we need to handle this.
+            if is_verbose and len(results) >= 2:
+                assert len(results) == 2
+                print_compare_method_results(results[0], results[1])
+                print()
 
         for _, method_info in statistics.items():
             print(
