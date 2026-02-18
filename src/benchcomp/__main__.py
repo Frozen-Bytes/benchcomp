@@ -1,8 +1,9 @@
 import logging
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from tabulate import tabulate
 
 from benchcomp.compare import BenchmarkCompareResult, Verdict, compare_benchmark
 from benchcomp.parser_cli import parse_commandline_args
@@ -21,141 +22,92 @@ def print_device_specifications(device: Device) -> None:
     print(f"  Emulator : {device.emulated}")
 
 
-@dataclass
-class TableFormatterConfig:
-    field_width_name: int = 40
-    field_width_iteration: int = 3
-    field_width_metric: int = 6
-    field_width_metric_value: int = 35
-    field_width_number: int = 25
-
-
-class TableFormatter():
-    statistics: list[BenchmarkCompareResult]
-    state_str: str
-    title: str | None
-    config: TableFormatterConfig
-
-    _COL_LABEL_BENCHMARK : str = "Benchmark:Iterations"
-    _COL_LABEL_METRIC    : str = "Metric"
-    _COL_LABEL_MINIMUM   : str = "Minimum"
-    _COL_LABEL_MEDIAN    : str = "Median"
-    _COL_LABEL_MAXIMUM   : str = "Maximum"
-    _COL_LABEL_STDEV     : str = "Standard Deviation"
-
-    _col_width_iteration    : int
-    _col_width_benchmark    : int
-    _col_width_metric       : int
-    _col_width_metric_value : int
-    _col_width_number       : int
-
-    def __init__(
-        self,
-        statistics: list[BenchmarkCompareResult],
-        state_str: str,
-        title: str | None = None,
-        formatter_conf: TableFormatterConfig=TableFormatterConfig(),
-    ) -> None:
-        self.statistics = statistics
-        self.state_str = state_str
-        self.title = title
-        self.config = formatter_conf
-
-        self._compute_column_widths()
-
-    def print(self) -> None:
-        header = self._build_header()
-        line = "-" * len(header)
-
-        print(line)
-        if self.title:
-            print(self.title.center(len(header)))
-            print(line)
-
-        print(header)
-        print(line)
-
-        for stat in self.statistics:
-            print(self._build_row(stat))
-
-        print(line)
-        regressions = [ r.a_bench_ref.name for r in self.statistics if r.verdict == Verdict.REGRESSION ]
-        print(f"Regressions ({len(regressions)}): {regressions}")
-        print()
-
-    def _build_header(self):
-        return " | ".join(
-            [
-                self._format_col(self._COL_LABEL_BENCHMARK, self._col_width_benchmark),
-                self._format_col(self._COL_LABEL_METRIC, self._col_width_metric),
-                self._format_col(self._COL_LABEL_MEDIAN, self._col_width_metric_value),
-                self._format_col(self._COL_LABEL_MINIMUM, self._col_width_number),
-                self._format_col(self._COL_LABEL_MAXIMUM, self._col_width_number),
-                self._format_col(self._COL_LABEL_STDEV, self._col_width_number),
-            ]
-        )
-
-    def _build_row(self, r: BenchmarkCompareResult) -> str:
-        benchmark_col = self._build_benchmark_name(r)
-        metric_col = self._format_col(r.a_metric.name_short, self._col_width_metric)
-        median_col = self._build_range(
-            r.a_metric.median(),
-            r.b_metric.median(),
-            infix=self._verdict_symbol(r.verdict),
-            suffix=f"({self.state_str}={r.result:.3f})",
-            unit=r.a_metric.unit,
-            width=self._col_width_metric_value,
-        )
-        min_col = self._build_range(r.a_metric.min(), r.b_metric.min(), unit=r.a_metric.unit)
-        max_col = self._build_range(r.a_metric.max(), r.b_metric.max(), unit=r.a_metric.unit)
-        stdev_col = self._build_range(r.a_metric.stdev(), r.b_metric.stdev(), unit=r.a_metric.unit)
-        return " | ".join([benchmark_col, metric_col, median_col, min_col, max_col, stdev_col])
-
-    def _build_range(
-        self,
+def _tabulate(
+    statistics_results: list[BenchmarkCompareResult],
+    stat_label: str,
+    title: str = "",
+) -> str:
+    def _format_cell(
         a: float,
         b: float,
-        *,
         infix: str = "-",
         suffix: str = "",
         unit: str = "",
-        width: int | None = None,
     ) -> str:
-        width = width or self._col_width_number
-        main = f"{a:.3f}{unit} {infix} {b:.3f}{unit}"
+        if infix:
+            infix = f" {infix} "
+        if suffix:
+            suffix = f" {suffix}"
+        return f"{a:.3f}{unit}{infix}{unit}{b:.3f}{suffix}"
 
-        if not suffix:
-            return self._format_col(main, width)
-
-        space_for_main = width - len(suffix) - 1
-        return f"{main:<{space_for_main}} {suffix}"
-
-    def _build_benchmark_name(self, r: BenchmarkCompareResult) -> str:
-        name_width = self._col_width_benchmark - self._col_width_iteration
-        name = r.a_bench_ref.name[:name_width]
-        return self._format_col(
-            f"{name}:{r.a_bench_ref.repeat_iterations}",
-            self._col_width_benchmark,
-        )
-
-    def _format_col(self, value: str, width: int) -> str:
-        return f"{value:<{width}}"
-
-    def _verdict_symbol(self, verdict: Verdict) -> str:
+    def _format_verdict(verdict: Verdict) -> str:
         return {
             Verdict.NOT_SIGNIFICANT: "~",
-            Verdict.IMPROVEMENT: "<",
-            Verdict.REGRESSION: ">",
+            Verdict.IMPROVEMENT: ">",
+            Verdict.REGRESSION: "<",
         }.get(verdict, "-")
 
-    def _compute_column_widths(self) -> None:
-        self._col_width_iteration = self.config.field_width_iteration
-        self._col_width_benchmark = (max(len(self._COL_LABEL_BENCHMARK), self.config.field_width_name) + self._col_width_iteration)
-        self._col_width_metric = max(len(self._COL_LABEL_METRIC), self.config.field_width_metric)
-        self._col_width_metric_value = max(len(self._COL_LABEL_MEDIAN), self.config.field_width_metric_value )
-        self._col_width_number = max(len(self._COL_LABEL_MINIMUM), self.config.field_width_number)
+    header = [
+        "Benchmark:Iteration",
+        "Metric",
+        "Median",
+        "Minimum",
+        "Maximum",
+        "Standard Deviation"
+    ]
 
+    tabular_data: list[list[Any]] = []
+    for result in statistics_results:
+        benchmark_name = result.a_bench_ref.name
+        assert benchmark_name == result.b_bench_ref.name
 
+        iteration = result.a_bench_ref.repeat_iterations
+        assert iteration == result.b_bench_ref.repeat_iterations
+
+        metric = result.a_metric.name_short
+        assert metric == result.b_metric.name_short
+
+        v_median = _format_cell(
+            result.a_metric.median(),
+            result.b_metric.median(),
+            infix = _format_verdict(result.verdict),
+            suffix = f"({stat_label}: {result.result:.3f})"
+        )
+        v_min   = _format_cell(result.a_metric.min(), result.b_metric.min())
+        v_max   = _format_cell(result.a_metric.max(), result.b_metric.max())
+        v_stdev = _format_cell(result.a_metric.stdev(), result.b_metric.stdev())
+
+        tabular_data.append(
+            [
+                f"{benchmark_name}:{iteration}",
+                metric,
+                v_median,
+                v_min,
+                v_max,
+                v_stdev,
+            ]
+        )
+
+    table = tabulate(
+        tabular_data = tabular_data,
+        headers = header,
+        tablefmt="rounded_outline"
+    )
+
+    out: list[str] = []
+    if title:
+        width = max(len(line) for line in table.split('\n'))
+        out.append(title.center(width))
+    out.append(table)
+
+    regressions = [
+        r.a_bench_ref.name
+        for r in statistics_results
+        if r.verdict == Verdict.REGRESSION
+    ]
+    out.append(f"Regressions ({len(regressions)}): {regressions}")
+
+    return "\n".join(out)
 
 
 def main() -> int:
@@ -236,7 +188,7 @@ def main() -> int:
                 "results": [],
             },
             "mannwhitneyu": {
-                "header": "Mann-Whitney U test",
+                "header": "Mann-Whitney U-Test",
                 "state": "pval",
                 "threshold": alpha,
                 "results": [],
@@ -262,7 +214,14 @@ def main() -> int:
                     logger.warning(f"couldn't compare '{method}' benchmark '{name}', skipping")
 
         for _, method_info in statistics.items():
-            TableFormatter(method_info["results"], state_str=method_info["state"], title=method_info["header"]).print()
+            print(
+                _tabulate(
+                    statistics_results=method_info["results"],
+                    stat_label=method_info["state"],
+                    title=method_info["header"],
+                )
+            )
+            print()
 
     return 0
 

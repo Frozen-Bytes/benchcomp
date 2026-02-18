@@ -12,6 +12,7 @@ description = "A CLI tool that compares Android Macrobenchmark results to detect
 requires-python = ">=3.10"
 dependencies = [
     "scipy",
+    "tabulate",
 ]
 classifiers = [
     "Programming Language :: Python :: 3.10",
