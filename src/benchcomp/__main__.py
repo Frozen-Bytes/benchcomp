@@ -1,4 +1,3 @@
-import argparse
 import json
 import logging
 import math
@@ -9,18 +8,12 @@ from pathlib import Path
 from statistics import mean, median, stdev
 from typing import Any
 
+from benchcomp.compare import DEFAULT_FRAME_TIME_TARGET_MS
 from scipy.stats import mannwhitneyu
 
-DEFAULT_STEP_FIT_THRESHOLD: float = 25.0
-DEFAULT_P_VALUE_THRESHOLD: float = 0.01
-DEFAULT_FRAME_TIME_TARGET_MS: float = 1000 / 60
+from benchcomp.parser_cli import parse_commandline_args
 
 logger = logging.getLogger(__name__)
-
-g_step_fit_threshold: float = DEFAULT_STEP_FIT_THRESHOLD
-g_p_value_threshold: float = DEFAULT_P_VALUE_THRESHOLD
-g_frame_time_target_ms: float = DEFAULT_FRAME_TIME_TARGET_MS
-
 
 @dataclass
 class Device:
@@ -692,51 +685,6 @@ class TableFormatter():
         self._col_width_number = max(len(self._COL_LABEL_MINIMUM), self.config.field_width_number)
 
 
-def parse_commandline_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        prog="benchcomp",
-        description="Compare between macrobenchmark reports"
-    )
-
-    # Positional Arguments
-    parser.add_argument(
-        "baseline_dir",
-        type=str,
-        help="Path to the baseline macrobenchmark report directory",
-    )
-    parser.add_argument(
-        "candidate_dir",
-        type=str,
-        help="Path to the candidate macrobenchmark report directory",
-    )
-
-    # Optional Arguments
-    parser.add_argument(
-        "--frametime",
-        dest="frametime_target",
-        type=float,
-        default=DEFAULT_FRAME_TIME_TARGET_MS,
-        metavar="MS",
-        help=f"Target frame time in milliseconds (Default: {DEFAULT_FRAME_TIME_TARGET_MS:.3f}ms)",
-    )
-    parser.add_argument(
-        "--fit",
-        dest="step_fit_threshold",
-        type=float,
-        default=DEFAULT_STEP_FIT_THRESHOLD,
-        metavar="VALUE",
-        help=f"Threshold for step fit analysis (Default: {DEFAULT_STEP_FIT_THRESHOLD:.3f})",
-    )
-    parser.add_argument(
-        "--alpha",
-        dest="pvalue_threshold",
-        type=float,
-        default=DEFAULT_P_VALUE_THRESHOLD,
-        metavar="VALUE",
-        help=f"P-value threshold for Mann-Whitney U-test significance (Default: {DEFAULT_P_VALUE_THRESHOLD:.3f})",
-    )
-
-    return parser.parse_args()
 
 
 def main() -> int:
@@ -748,12 +696,9 @@ def main() -> int:
     candidate_files = sorted(candidate_dir.glob("*.json"))
 
     # set globals
-    global g_step_fit_threshold
-    global g_p_value_threshold
-    global g_frame_time_target_ms
-    g_step_fit_threshold = args.step_fit_threshold
-    g_p_value_threshold = args.pvalue_threshold
-    g_frame_time_target_ms =  args.frametime_target
+    step_fit_threshold = args.step_fit_threshold
+    alpha = args.pvalue_threshold
+    frametim_target_ms =  args.frametime_target
 
     if len(baseline_files) <= 0:
         logger.critical('baseline has no macrobenchmark results')
@@ -835,7 +780,7 @@ def main() -> int:
                 baseline_benchmark,
                 candidate_benchmark,
                 method="stepfit",
-                threshold=g_step_fit_threshold,
+                threshold=step_fit_threshold,
             )
             if result is not None:
                 statistics["stepfit"]["results"].append(result)
@@ -847,7 +792,8 @@ def main() -> int:
                 baseline_benchmark,
                 candidate_benchmark,
                 method="mannwhitneyu",
-                threshold=g_p_value_threshold
+                threshold=alpha,
+                frametime_target=frametim_target_ms
             )
             if result is not None:
                 statistics["mannwhitneyu"]["results"].append(result)
