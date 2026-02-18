@@ -169,7 +169,7 @@ def main() -> int:
     # set globals
     step_fit_threshold = args.step_fit_threshold
     alpha = args.pvalue_threshold
-    frametim_target_ms =  args.frametime_target
+    frametime_target_ms =  args.frametime_target
 
     if len(baseline_files) <= 0:
         logger.critical('baseline has no macrobenchmark results')
@@ -232,11 +232,13 @@ def main() -> int:
             "stepfit": {
                 "header": "Step Fit",
                 "state": "fit",
+                "threshold": step_fit_threshold,
                 "results": [],
             },
             "mannwhitneyu": {
                 "header": "Mann-Whitney U test",
                 "state": "pval",
+                "threshold": alpha,
                 "results": [],
             },
         }
@@ -246,33 +248,21 @@ def main() -> int:
                 logger.warning(f"baseline does not contain benchmark '{name}', skipping")
                 continue
 
-            # Step Fit
-            result = compare_benchmark(
-                baseline_benchmark,
-                candidate_benchmark,
-                method="stepfit",
-                threshold=step_fit_threshold,
-            )
-            if result is not None:
-                statistics["stepfit"]["results"].append(result)
-            else:
-                logger.warning(f"couldn't compare 'Step Fit' benchmark '{name}', skipping")
+            for method, method_info in statistics.items():
+                result = compare_benchmark(
+                    baseline_benchmark,
+                    candidate_benchmark,
+                    method=method,
+                    threshold=method_info["threshold"],
+                    frametime_target=frametime_target_ms
+                )
+                if result is not None:
+                    statistics[method]["results"].append(result)
+                else:
+                    logger.warning(f"couldn't compare '{method}' benchmark '{name}', skipping")
 
-            # Mann-Whitney's U-test
-            result = compare_benchmark(
-                baseline_benchmark,
-                candidate_benchmark,
-                method="mannwhitneyu",
-                threshold=alpha,
-                frametime_target=frametim_target_ms
-            )
-            if result is not None:
-                statistics["mannwhitneyu"]["results"].append(result)
-            else:
-                logger.warning(f"couldn't compare 'Mann-Whitney's U-test' benchmark '{name}', skipping")
-
-        for _, v in statistics.items():
-            TableFormatter(v["results"], state_str=v["state"], title=v["header"]).print()
+        for _, method_info in statistics.items():
+            TableFormatter(method_info["results"], state_str=method_info["state"], title=method_info["header"]).print()
 
     return 0
 
