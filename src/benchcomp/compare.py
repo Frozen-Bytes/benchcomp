@@ -2,7 +2,7 @@ import logging
 import math
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, Self
 
 from scipy.stats import mannwhitneyu
 
@@ -11,6 +11,7 @@ from benchcomp.parser_common import (
     FrameTimingMetric,
     MemoryUsageMetric,
     Metric,
+    MetricMetadata,
     StartupTimingMetric,
 )
 
@@ -31,6 +32,24 @@ class BenchmarkCompareResult:
     verdict: Verdict
     result: Any
 
+    def get_benchmark_name(self) -> str:
+        return self.a_bench_ref.name
+
+    def get_benchmark_class(self) -> str:
+        return self.a_bench_ref.class_name
+
+    def get_metric_metadata(self) -> MetricMetadata:
+        return self.a_metric.metadata
+
+    def is_compatible_with(self, other: Self) -> bool:
+        return (
+            (self.a_bench_ref.is_same_benchmark(other.a_bench_ref))
+            and (self.b_bench_ref.is_same_benchmark(other.b_bench_ref))
+            and (self.a_metric.metadata == other.a_metric.metadata)
+            and (self.b_metric.metadata == other.b_metric.metadata)
+            and (self.method == other.method)
+            and (type(self.result) is type(other.result))
+        )
 
 DEFAULT_STEP_FIT_THRESHOLD: float = 25.0
 DEFAULT_P_VALUE_THRESHOLD: float = 0.01
@@ -64,53 +83,39 @@ def compare_benchmark(
     *args,
     **kwargs,
 ) -> BenchmarkCompareResult | None:
-    assert a.name == b.name
+    assert a.is_same_benchmark(b)
 
     if a.repeat_iterations != b.repeat_iterations:
         logger.warning(f"benchmark '{a.name}' iteration mismatch, (a: {a.repeat_iterations}, b: {b.repeat_iterations})")
 
-    a_metric: Metric
-    b_metric: Metric
+    a_runs: list[float]
+    b_runs: list[float]
     if isinstance(a.data, StartupTimingMetric) and isinstance(b.data, StartupTimingMetric):
-        a_metric = a.data.time_to_initial_display_ms
-        b_metric = b.data.time_to_initial_display_ms
+        metadata = a.data.time_to_initial_display_ms.metadata
+        a_runs = a.data.time_to_initial_display_ms.runs
+        b_runs = b.data.time_to_initial_display_ms.runs
     elif isinstance(a.data, FrameTimingMetric) and isinstance(b.data, FrameTimingMetric):
-        metric_name = "Freeze Frame Duration"
-        metric_name_short = "FFD"
-        metric_unit = "ms"
-
-        a_metric = Metric(
-            _runs=a.data.calc_freeze_frame_duration_ms(frametime_target),
-            name=metric_name,
-            name_short=metric_name_short,
-            unit=metric_unit,
+        metadata = MetricMetadata(
+            name="Freeze Frame Duration",
+            name_short="FFD",
+            unit="ms",
         )
-        b_metric = Metric(
-            _runs=b.data.calc_freeze_frame_duration_ms(frametime_target),
-            name=metric_name,
-            name_short=metric_name_short,
-            unit=metric_unit,
-        )
+        a_runs=a.data.calc_freeze_frame_duration_ms(frametime_target)
+        b_runs=b.data.calc_freeze_frame_duration_ms(frametime_target)
     elif isinstance(a.data, MemoryUsageMetric) and isinstance(b.data, MemoryUsageMetric):
-        metric_name = "Total Memory Usage"
-        metric_name_short = "MEMU"
-        metric_unit = "Kb"
-
-        a_metric = Metric(
-            _runs=a.data.memory_rss_anon_kb.runs + a.data.memory_rss_file_kb.runs,
-            name=metric_name,
-            name_short=metric_name_short,
-            unit=metric_unit,
+        metadata = MetricMetadata(
+            name="Total Memory Usage",
+            name_short="MEMU",
+            unit="Kb",
         )
-        b_metric = Metric(
-            _runs=b.data.memory_rss_anon_kb.runs + b.data.memory_rss_file_kb.runs,
-            name=metric_name,
-            name_short=metric_name_short,
-            unit=metric_unit,
-        )
+        a_runs=(a.data.memory_rss_anon_kb.runs + a.data.memory_rss_file_kb.runs)
+        b_runs=(b.data.memory_rss_anon_kb.runs + b.data.memory_rss_file_kb.runs)
     else:
         logger.warning(f"benchmark '{a.name}' type mismatch or unknown, skipping. (a_type: {type(a.data)}, b_type: {type(b.data)})")
         return None
+
+    a_metric = Metric(metadata=metadata, _runs=a_runs)
+    b_metric = Metric(metadata=metadata, _runs=b_runs)
 
     verdict: Verdict = Verdict.NOT_SIGNIFICANT
     compare_result = None
@@ -156,7 +161,7 @@ def compare_benchmark(
             case _:
                 assert False, "Unknown compare function"
     except Exception as e:
-        logger.warning(f"failed to compare benchmark '{a.name}' metric '{a_metric.name}', skipping. ({e})'")
+        logger.warning(f"failed to compare benchmark '{a.name}' metric '{metadata.name}', skipping. ({e})'")
         return None
 
     return BenchmarkCompareResult(

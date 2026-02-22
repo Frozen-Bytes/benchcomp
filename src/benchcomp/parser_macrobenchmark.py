@@ -11,6 +11,7 @@ from benchcomp.parser_common import (
     MemoryMetricMode,
     MemoryUsageMetric,
     Metric,
+    MetricMetadata,
     SampledMetric,
     StartupTimingMetric,
 )
@@ -32,10 +33,12 @@ def _parse_device(data: dict[str, Any]) -> Device:
 
 def _parse_metric(data: dict[str, Any], name: str, name_short: str, unit: str) -> Metric:
     return Metric(
+        MetricMetadata(
+            name=name,
+            name_short=name_short,
+            unit=unit,
+        ),
         _runs=data.get("runs", []),
-        name=name,
-        name_short=name_short,
-        unit=unit,
     )
 
 def _parse_sampled_metric(data: dict[str, Any]) -> SampledMetric:

@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from enum import Enum
 from statistics import mean, median, stdev
+from typing import Self
 
 
 @dataclass
@@ -15,11 +16,16 @@ class Device:
 
 
 @dataclass
-class Metric:
-    # Easier printing
+class MetricMetadata:
     name: str
     name_short: str
     unit: str
+
+
+@dataclass
+class Metric:
+    # Easier printing
+    metadata: MetricMetadata
 
     _runs: list[float]
 
@@ -169,6 +175,13 @@ class Benchmark:
     warmup_iterations: int
     repeat_iterations: int
     data: StartupTimingMetric | FrameTimingMetric | MemoryUsageMetric | None
+
+    def is_same_benchmark(self, other: Self) -> bool:
+        return (
+            (self.name == other.name)
+            and (self.class_name == other.class_name)
+            and (type(self.data) is type(other.data))
+        )
 
 
 @dataclass

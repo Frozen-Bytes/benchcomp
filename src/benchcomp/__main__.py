@@ -8,7 +8,7 @@ from tabulate import tabulate
 
 from benchcomp.compare import BenchmarkCompareResult, Verdict, compare_benchmark
 from benchcomp.parser_cli import parse_commandline_args
-from benchcomp.parser_common import Benchmark, BenchmarkReport, Device
+from benchcomp.parser_common import Benchmark, BenchmarkReport, Device, MetricMetadata
 from benchcomp.parser_macrobenchmark import parse_macrobechmark_report
 
 logger = logging.getLogger(__name__)
@@ -20,6 +20,7 @@ class CompareMethodStruct:
     header: str
     results: list[BenchmarkCompareResult]
 
+
 def print_device_specifications(device: Device) -> None:
     print(f"Device ({device.name}):")
     print(f"  Brand    : {device.brand}")
@@ -30,25 +31,20 @@ def print_device_specifications(device: Device) -> None:
     print(f"  Emulator : {device.emulated}")
 
 
-# TODO: This is bad
-def print_compare_method_results(cr_a: BenchmarkCompareResult, cr_b: BenchmarkCompareResult) -> None:
+def print_compare_method_results(
+    cr_a: BenchmarkCompareResult,
+    cr_b: BenchmarkCompareResult,
+) -> None:
     def to_seconds(time_ns: float):
         return time_ns / (1000 * 1000 * 1000)
 
-    benchmark_name = cr_a.a_bench_ref.name
-    assert benchmark_name == cr_a.b_bench_ref.name
+    assert cr_a.is_compatible_with(cr_b)
 
-    benchmark_class = cr_a.a_bench_ref.class_name
-    assert benchmark_class == cr_a.b_bench_ref.class_name
-
-    metric_name_long = cr_a.a_metric.name
-    assert metric_name_long == cr_a.b_metric.name
-
-    metric_name_short = cr_a.a_metric.name_short
-    assert metric_name_short == cr_a.b_metric.name_short
-
-    baseline_runs = ", ".join(f"{x:.3f}" for x in cr_a.a_metric.runs)
-    candidate_runs = ", ".join(f"{x:.3f}" for x in cr_a.b_metric.runs)
+    # Common metadata
+    benchmark_name: str = cr_a.get_benchmark_name()
+    benchmark_class: str = cr_a.get_benchmark_class()
+    metric_metadata: MetricMetadata = cr_a.get_metric_metadata()
+    method: str = cr_a.method
 
     total_run_time_sec: float = to_seconds(
         cr_a.a_bench_ref.total_run_time_ns + cr_a.a_bench_ref.total_run_time_ns
@@ -56,16 +52,19 @@ def print_compare_method_results(cr_a: BenchmarkCompareResult, cr_b: BenchmarkCo
     a_run_time_sec: float = to_seconds(cr_a.a_bench_ref.total_run_time_ns)
     b_run_time_sec: float = to_seconds(cr_a.b_bench_ref.total_run_time_ns)
 
+    baseline_runs = ", ".join(f"{x:.3f}" for x in cr_a.a_metric.runs)
+    candidate_runs = ", ".join(f"{x:.3f}" for x in cr_a.b_metric.runs)
+
     print(f"> Benchmark '{benchmark_name}':")
     print(f"    Class               : {benchmark_class}")
     print(f"    Total Run Time (s)  : {total_run_time_sec:.3f} (Baseline: {a_run_time_sec:.3f}, Candidate: {b_run_time_sec:.3f})")
     print(f"    Warmup   Iterations : (Baseline: {cr_a.a_bench_ref.warmup_iterations}, Candidate: {cr_a.b_bench_ref.warmup_iterations})")
     print(f"    Repeated Iterations : (Baseline: {cr_a.a_bench_ref.repeat_iterations}, Candidate: {cr_a.b_bench_ref.repeat_iterations})")
-    print(f"    Metric              : {metric_name_long} ({metric_name_short})")
-    print(f"    Baseline  Runs ({cr_a.a_metric.unit}) : [{baseline_runs}]")
-    print(f"    Candidate Runs ({cr_a.a_metric.unit}) : [{candidate_runs}]")
-    print(f"    Verdict             : ({cr_a.method}: {cr_a.verdict}, {cr_b.method}: {cr_b.verdict})")
-    print(f"    Statistic           : ({cr_a.method}: {cr_a.result:.3f}, {cr_b.method}: {cr_b.result:.3f})")
+    print(f"    Metric              : {metric_metadata.name} ({metric_metadata.name_short})")
+    print(f"    Baseline  Runs ({metric_metadata.unit}) : [{baseline_runs}]")
+    print(f"    Candidate Runs ({metric_metadata.unit}) : [{candidate_runs}]")
+    print(f"    Verdict             : ({method}: {cr_a.verdict}, {cr_b.method}: {cr_b.verdict})")
+    print(f"    Statistic           : ({method}: {cr_a.result:.3f}, {cr_b.method}: {cr_b.result:.3f})")
 
 
 def _tabulate(
@@ -104,14 +103,13 @@ def _tabulate(
 
     tabular_data: list[list[Any]] = []
     for result in statistics_results:
-        benchmark_name = result.a_bench_ref.name
-        assert benchmark_name == result.b_bench_ref.name
+        iterations: str = ""
+        if result.a_bench_ref.repeat_iterations == result.b_bench_ref.repeat_iterations:
+            iterations = f"{result.a_bench_ref.repeat_iterations}"
+        else:
+            iterations = f"{result.a_bench_ref.repeat_iterations}, {result.b_bench_ref.repeat_iterations}"
 
-        iteration = result.a_bench_ref.repeat_iterations
-        assert iteration == result.b_bench_ref.repeat_iterations
-
-        metric = result.a_metric.name_short
-        assert metric == result.b_metric.name_short
+        metric_metadata: MetricMetadata = result.get_metric_metadata()
 
         v_median = _format_cell(
             result.a_metric.median(),
@@ -125,8 +123,8 @@ def _tabulate(
 
         tabular_data.append(
             [
-                f"{benchmark_name}:{iteration}",
-                metric,
+                f"{result.get_benchmark_name()}:{iterations}",
+                metric_metadata,
                 v_median,
                 v_min,
                 v_max,
