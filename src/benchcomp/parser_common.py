@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from statistics import mean, median, stdev
 from typing import Self
 
@@ -186,5 +187,37 @@ class Benchmark:
 
 @dataclass
 class BenchmarkReport:
+    filepath: Path
     device: Device = field(default_factory=Device)
     benchmarks: dict[str, Benchmark] = field(default_factory=dict)
+
+
+def calc_total_run_time(benchmarks: list[Benchmark], unit="s") -> float:
+    def humanize_time(time: float, unit: str) -> float:
+        denom: dict[str, int] = {
+            "ns": 1,
+            "ms": 1_000_000,
+            "s": 1_000_000_000,
+        }
+        return time / denom[unit]
+
+    time: float = 0.0
+    for b in benchmarks:
+        time += humanize_time(b.total_run_time_ns, unit)
+    return time
+
+
+def calc_total_iterations(benchmarks: list[Benchmark], type: str) -> int:
+    if type == "warm":
+        def it_access_func(b: Benchmark):
+            return b.warmup_iterations
+    elif type == "repeat":
+        def it_access_func(b: Benchmark):
+            return b.repeat_iterations
+    else:
+        raise ValueError(f"Unknown iteration type '{type}'")
+
+    iters: int = 0
+    for b in benchmarks:
+        iters += it_access_func(b)
+    return iters

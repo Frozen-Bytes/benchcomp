@@ -1,5 +1,6 @@
 import logging
 import sys
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -8,7 +9,14 @@ from tabulate import tabulate
 
 from benchcomp.compare import BenchmarkCompareResult, Verdict, compare_benchmark
 from benchcomp.parser_cli import parse_commandline_args
-from benchcomp.parser_common import Benchmark, BenchmarkReport, Device, MetricMetadata
+from benchcomp.parser_common import (
+    Benchmark,
+    BenchmarkReport,
+    Device,
+    MetricMetadata,
+    calc_total_iterations,
+    calc_total_run_time,
+)
 from benchcomp.parser_macrobenchmark import parse_macrobechmark_report
 
 logger = logging.getLogger(__name__)
@@ -34,37 +42,46 @@ def print_device_specifications(device: Device) -> None:
 def print_compare_method_results(
     cr_a: BenchmarkCompareResult,
     cr_b: BenchmarkCompareResult,
+    total_run_time_s: float | None
 ) -> None:
-    def to_seconds(time_ns: float):
-        return time_ns / (1000 * 1000 * 1000)
+    ref_cr = cr_a
 
-    assert cr_a.is_compatible_with(cr_b)
+    benchmark_name: str = ref_cr.benchmark_name
+    benchmark_class: str = ref_cr.benchmark_class
+    metric_metadata: MetricMetadata = cr_a.metric_metadata
+    method: str = ref_cr.method
 
-    # Common metadata
-    benchmark_name: str = cr_a.get_benchmark_name()
-    benchmark_class: str = cr_a.get_benchmark_class()
-    metric_metadata: MetricMetadata = cr_a.get_metric_metadata()
-    method: str = cr_a.method
+    a_total_rum_time_s = calc_total_run_time(ref_cr.a_bench_ref)
+    b_total_rum_time_s = calc_total_run_time(ref_cr.b_bench_ref)
+    ab_run_time_s = a_total_rum_time_s + b_total_rum_time_s
+    run_time_percent: str = ""
+    if total_run_time_s:
+        run_time_percent = f" ({(ab_run_time_s / total_run_time_s) * 100:.2f}%)"
 
-    total_run_time_sec: float = to_seconds(
-        cr_a.a_bench_ref.total_run_time_ns + cr_a.a_bench_ref.total_run_time_ns
-    )
-    a_run_time_sec: float = to_seconds(cr_a.a_bench_ref.total_run_time_ns)
-    b_run_time_sec: float = to_seconds(cr_a.b_bench_ref.total_run_time_ns)
+    a_total_warm_iters = calc_total_iterations(ref_cr.a_bench_ref, "warm")
+    b_total_warm_iters = calc_total_iterations(ref_cr.b_bench_ref, "warm")
+    a_total_repeat_iters = calc_total_iterations(ref_cr.a_bench_ref, "repeat")
+    b_total_repeat_iters = calc_total_iterations(ref_cr.b_bench_ref, "repeat")
 
-    baseline_runs = ", ".join(f"{x:.3f}" for x in cr_a.a_metric.runs)
-    candidate_runs = ", ".join(f"{x:.3f}" for x in cr_a.b_metric.runs)
+    baseline_runs = ", ".join(f"{x:.3f}" for x in ref_cr.a_metric.runs)
+    candidate_runs = ", ".join(f"{x:.3f}" for x in ref_cr.b_metric.runs)
 
     print(f"> Benchmark '{benchmark_name}':")
     print(f"    Class               : {benchmark_class}")
-    print(f"    Total Run Time (s)  : {total_run_time_sec:.3f} (Baseline: {a_run_time_sec:.3f}, Candidate: {b_run_time_sec:.3f})")
-    print(f"    Warmup   Iterations : (Baseline: {cr_a.a_bench_ref.warmup_iterations}, Candidate: {cr_a.b_bench_ref.warmup_iterations})")
-    print(f"    Repeated Iterations : (Baseline: {cr_a.a_bench_ref.repeat_iterations}, Candidate: {cr_a.b_bench_ref.repeat_iterations})")
+    print(f"    Run Time (s)        : {ab_run_time_s:.3f} (Baseline: {a_total_rum_time_s:.3f}, Candidate: {b_total_rum_time_s:.3f}){run_time_percent}")
+    print(f"    Warmup   Iterations : (Baseline: {a_total_warm_iters}, Candidate: {b_total_warm_iters})")
+    print(f"    Repeated Iterations : (Baseline: {a_total_repeat_iters}, Candidate: {b_total_repeat_iters})")
     print(f"    Metric              : {metric_metadata.name} ({metric_metadata.name_short})")
     print(f"    Baseline  Runs ({metric_metadata.unit}) : [{baseline_runs}]")
     print(f"    Candidate Runs ({metric_metadata.unit}) : [{candidate_runs}]")
     print(f"    Verdict             : ({method}: {cr_a.verdict}, {cr_b.method}: {cr_b.verdict})")
     print(f"    Statistic           : ({method}: {cr_a.result:.3f}, {cr_b.method}: {cr_b.result:.3f})")
+
+
+def print_report_paths(label: str, reports: list[BenchmarkReport]):
+    print(f"  > {label} benchmark reports:")
+    for r in reports:
+        print(f"    - {r.filepath}")
 
 
 def _tabulate(
@@ -104,12 +121,14 @@ def _tabulate(
     tabular_data: list[list[Any]] = []
     for result in statistics_results:
         iterations: str = ""
-        if result.a_bench_ref.repeat_iterations == result.b_bench_ref.repeat_iterations:
-            iterations = f"{result.a_bench_ref.repeat_iterations}"
+        a_total_repeat_iters = calc_total_iterations(result.a_bench_ref, "repeat")
+        b_total_repeat_iters = calc_total_iterations(result.b_bench_ref, "repeat")
+        if a_total_repeat_iters == b_total_repeat_iters:
+            iterations = f"{a_total_repeat_iters}"
         else:
-            iterations = f"{result.a_bench_ref.repeat_iterations}, {result.b_bench_ref.repeat_iterations}"
+            iterations = f"{a_total_repeat_iters}, {b_total_repeat_iters}"
 
-        metric_metadata: MetricMetadata = result.get_metric_metadata()
+        metric_metadata: MetricMetadata = result.metric_metadata
 
         v_median = _format_cell(
             result.a_metric.median(),
@@ -123,8 +142,8 @@ def _tabulate(
 
         tabular_data.append(
             [
-                f"{result.get_benchmark_name()}:{iterations}",
-                metric_metadata,
+                f"{result.benchmark_name}:{iterations}",
+                metric_metadata.name_short,
                 v_median,
                 v_min,
                 v_max,
@@ -145,7 +164,7 @@ def _tabulate(
     out.append(table)
 
     regressions = [
-        r.a_bench_ref.name
+        r.benchmark_name
         for r in statistics_results
         if r.verdict == Verdict.REGRESSION
     ]
@@ -154,78 +173,126 @@ def _tabulate(
     return "\n".join(out)
 
 
+def get_files(baseline_path: Path, candidate_path: Path) -> tuple[list[Path], list[Path]]:
+    """
+    Resolves paths into lists of JSON benchmark files.
+
+    Args:
+        baseline_path: Path to baseline directory or file.
+        candidate_path: Path to candidate directory or file.
+
+    Returns:
+        A tuple containing (baseline_files, candidate_files).
+    """
+    def _get_files_from_path(p: Path) -> list[Path]:
+        if p.is_dir():
+            return sorted(p.glob("*.json"))
+        if p.is_file():
+            return [p]
+        return []
+
+    baseline_files: list[Path] = _get_files_from_path(baseline_path)
+    candidate_files: list[Path] = _get_files_from_path(candidate_path)
+    return baseline_files, candidate_files
+
+
+def read_reports(files: list[Path]) -> list[BenchmarkReport]:
+    """Parses benchmark files into BenchmarkReport objects, skipping invalid ones."""
+    reports: list[BenchmarkReport] = []
+    for f in files:
+        report: BenchmarkReport | None = parse_macrobechmark_report(f)
+        if report:
+            reports.append(report)
+        else:
+            logger.error(f"invalid benchmark report '{f}', skipping.\n")
+    return reports
+
+
+def collect_benchmarks(reports: list[BenchmarkReport]) -> dict[str, list[Benchmark]]:
+    """Groups benchmark results by their names across multiple reports."""
+    benchmarks: dict[str, list[Benchmark]] = defaultdict(list)
+    for report in reports:
+        for name, benchmark in report.benchmarks.items():
+            benchmarks[name].append(benchmark)
+    return benchmarks
+
+
 def main() -> int:
     args = parse_commandline_args()
 
-    baseline_dir = Path(args.baseline_dir)
-    candidate_dir = Path(args.candidate_dir)
-    baseline_files = sorted(baseline_dir.glob("*.json"))
-    candidate_files = sorted(candidate_dir.glob("*.json"))
-
-    # set globals
     step_fit_threshold = args.step_fit_threshold
     alpha = args.pvalue_threshold
-    frametime_target_ms =  args.frametime_target
+    frametime_target_ms = args.frametime_target
     is_verbose = args.verbose
+    aggregation_method = args.aggregate_method
 
+    baseline_files, candidate_files = get_files(args.baseline, args.candidate)
     if len(baseline_files) <= 0:
-        logger.critical('baseline has no macrobenchmark results')
+        logger.critical('baseline has no Macrobenchmark results')
         return 1
-
     if len(candidate_files) <= 0:
-        logger.critical('candidate has no macrobenchmark results')
+        logger.critical('candidate has no Macrobenchmark results')
         return 1
 
-    min_len = min(len(baseline_files), len(candidate_files))
-    if len(baseline_files) != len(candidate_files):
-        logger.warning(f"length mismatch, using first {min_len} samples. baseline: {len(baseline_files)}, candidate: {len(candidate_files)}")
+    baseline_reports: list[BenchmarkReport] = read_reports(baseline_files)
+    candidate_reports: list[BenchmarkReport] = read_reports(candidate_files)
+    comparison_groups = []
+    if args.aggregate_method == "none":
+        min_len = min(len(baseline_reports), len(candidate_reports))
+        if len(baseline_reports) != len(candidate_reports):
+            logger.warning(f"length mismatch, using first {min_len} samples. baseline: {len(baseline_reports)}, candidate: {len(candidate_reports)}")
 
-    print('Macrobenchmark Result Mapping:')
-    print('| Index | Baseline | Candidate |')
-    print('--------------------------------')
-
-    mismatch_count = 0
-    for i in range(min_len):
-        baseline_filename = baseline_files[i].name.upper()
-        candidate_filename = candidate_files[i].name.upper()
-        if baseline_filename != candidate_filename:
-            mismatch_count += 1
-            print('* ', end='')
-        print(f'{i + 1} {baseline_files[i]} <-> {candidate_files[i]}')
-
-    print('--------------------------------')
-    print(f'# Match   : {min_len - mismatch_count}')
-    print(f'# Mismatch: {mismatch_count}')
-    if mismatch_count > 0:
-        logger.warning("filename mapping mismatch detected. Output prediction may be incorrect")
-    print()
-
-    for i in range(min_len):
-        print(f"Comparing Benchmark Run ({i + 1} / {min_len})")
-
-        baseline_file:Path = baseline_files[i]
-        candidate_file:Path = candidate_files[i]
-        print(f"  > Baseline  benchmark report: {baseline_file.name}")
-        print(f"  > Candidate benchmark report: {candidate_file.name}")
+        print('Macrobenchmark Result Mapping:')
+        print('| Index | Baseline | Candidate |')
+        print('--------------------------------')
+        mismatch_count = 0
+        for i in range(min_len):
+            baseline_filename = baseline_files[i].name.upper()
+            candidate_filename = candidate_files[i].name.upper()
+            if baseline_filename != candidate_filename:
+                mismatch_count += 1
+                print('* ', end='')
+            print(f'{i + 1} {baseline_files[i]} <-> {candidate_files[i]}')
+        print('--------------------------------')
+        print(f'# Match   : {min_len - mismatch_count}')
+        print(f'# Mismatch: {mismatch_count}')
+        if mismatch_count > 0:
+            logger.warning("filename mapping mismatch detected. Output prediction may be incorrect")
         print()
 
-        baseline_report: BenchmarkReport | None = parse_macrobechmark_report(baseline_file)
-        candidate_report: BenchmarkReport | None = parse_macrobechmark_report(candidate_file)
-        if baseline_report is None or candidate_report is None:
-            logger.error(f"invalid benchmark reports, skipping.\n  baseline: '{baseline_file}',\n  candidate: '{candidate_file}'")
-            continue
+        for i in range(min_len):
+            b, c = baseline_reports[i], candidate_reports[i]
+            title = f"Comparing Benchmark Run ({i + 1} / {min_len})"
+            common_names = b.benchmarks.keys() & c.benchmarks.keys()
+            # TODO: Check for missing common names
+            pairs = {name: ([b.benchmarks[name]], [c.benchmarks[name]]) for name in common_names}
+            comparison_groups.append((title, pairs, [b], [c]))
+    else:
+        title = f"Comparing Benchmark Run (Aggregation: {aggregation_method})"
+        b_benchmarks = collect_benchmarks(baseline_reports)
+        c_benchmarks = collect_benchmarks(candidate_reports)
+        common_names = b_benchmarks.keys() & c_benchmarks.keys()
+        # TODO: Check for missing common names
+        pairs = {name: (b_benchmarks[name], c_benchmarks[name]) for name in common_names}
+        comparison_groups.append((title, pairs, baseline_reports, candidate_reports))
 
-        if baseline_report.device != candidate_report.device:
-            logger.warning(f"benchmark device mismatch detected.\n  baseline: '{baseline_file}',\n  candidate: '{candidate_file}'")
-            print("Baseline", end="")
-            print_device_specifications(baseline_report.device)
-            print("Candidate", end="")
-            print_device_specifications(candidate_report.device)
-        else:
-            print_device_specifications(baseline_report.device)
+    for title, benchmark_pairs, b_reps, c_reps in comparison_groups:
+        print(title)
+        print_report_paths("Baseline", b_reps)
+        print_report_paths("Candidate", c_reps)
         print()
 
-        statistics: dict[str, Any]= {
+        # if b.device != c.device:
+        #     logger.warning(f"benchmark device mismatch detected.\n  baseline: '{b.filepath}',\n  candidate: '{c.filepath}'")
+        #     print("Baseline", end="")
+        #     print_device_specifications(b.device)
+        #     print("Candidate", end="")
+        #     print_device_specifications(c.device)
+        # else:
+        #     print_device_specifications(b.device)
+        # print()
+
+        stats_config = {
             "stepfit": {
                 "header": "Step Fit",
                 "state": "fit",
@@ -239,45 +306,37 @@ def main() -> int:
                 "results": [],
             },
         }
-        for name, candidate_benchmark in candidate_report.benchmarks.items():
-            baseline_benchmark: Benchmark | None = baseline_report.benchmarks.get(name)
-            if baseline_benchmark is None:
-                logger.warning(f"baseline does not contain benchmark '{name}', skipping")
-                continue
 
-            results: list[BenchmarkCompareResult] = []
-            for method, method_info in statistics.items():
-                result: BenchmarkCompareResult | None = compare_benchmark(
-                    baseline_benchmark,
-                    candidate_benchmark,
+        total_run_time = 0.0
+        for name, (b_list, c_list) in benchmark_pairs.items():
+            current_pair_results = []
+
+            for method, info in stats_config.items():
+                result = compare_benchmark(
+                    b_list,
+                    c_list,
                     method=method,
-                    threshold=method_info["threshold"],
-                    frametime_target=frametime_target_ms
+                    threshold=info["threshold"],
+                    frametime_target=frametime_target_ms,
+                    aggregate=aggregation_method,
                 )
-                if result is not None:
-                    results.append(result)
+
+                if result:
+                    current_pair_results.append(result)
+                    info["results"].append(result)
                 else:
-                    logger.warning(f"couldn't compare '{method}' benchmark '{name}', skipping")
+                    logger.warning(f"Skipping '{method}' for '{name}'")
 
-            for result in results:
-                statistics[result.method]["results"].append(result)
-
-            # TODO: Verbose mode is hardcoded to support 2 methods (stepfit, and mannwhitneyu) only,
-            # if we add more we need to handle this.
-            if is_verbose and len(results) >= 2:
-                assert len(results) == 2
-                print_compare_method_results(results[0], results[1])
+            total_run_time += calc_total_run_time(b_list + c_list)
+            if is_verbose and len(current_pair_results) >= 2:
+                assert len(current_pair_results) == 2
+                print_compare_method_results(current_pair_results[0], current_pair_results[1], total_run_time)
                 print()
 
-        for _, method_info in statistics.items():
-            print(
-                _tabulate(
-                    statistics_results=method_info["results"],
-                    stat_label=method_info["state"],
-                    title=method_info["header"],
-                )
-            )
-            print()
+        for _, info in stats_config.items():
+            if info["results"]:
+                print(_tabulate(info["results"], info["state"], info["header"]))
+                print()
 
     return 0
 

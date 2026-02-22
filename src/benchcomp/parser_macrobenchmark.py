@@ -209,7 +209,7 @@ def _parse_benchmark(data: dict[str, Any]) -> Benchmark | None:
 
 
 def parse_macrobechmark_report(path: Path | str) -> BenchmarkReport | None:
-    report: BenchmarkReport = BenchmarkReport()
+    report: BenchmarkReport = BenchmarkReport(filepath=Path(path))
     with open(path, "r") as file:
         try:
             root = json.load(file)

@@ -1,6 +1,8 @@
 import argparse
+from pathlib import Path
 
 from benchcomp.compare import (
+    AGGREGATE_METHODS,
     DEFAULT_FRAME_TIME_TARGET_MS,
     DEFAULT_P_VALUE_THRESHOLD,
     DEFAULT_STEP_FIT_THRESHOLD,
@@ -15,14 +17,14 @@ def parse_commandline_args() -> argparse.Namespace:
 
     # Positional Arguments
     parser.add_argument(
-        "baseline_dir",
-        type=str,
-        help="Path to the baseline macrobenchmark report directory",
+        "baseline",
+        type=Path,
+        help="Path to the baseline macrobenchmark report directory or file",
     )
     parser.add_argument(
-        "candidate_dir",
-        type=str,
-        help="Path to the candidate macrobenchmark report directory",
+        "candidate",
+        type=Path,
+        help="Path to the candidate macrobenchmark report directory or file",
     )
 
     # Optional Arguments
@@ -49,6 +51,15 @@ def parse_commandline_args() -> argparse.Namespace:
         default=DEFAULT_P_VALUE_THRESHOLD,
         metavar="VALUE",
         help=f"P-value threshold for Mann-Whitney U-test significance (Default: {DEFAULT_P_VALUE_THRESHOLD:.3f})",
+    )
+    parser.add_argument(
+        "--aggregate",
+        dest="aggregate_method",
+        type=str,
+        metavar="VALUE",
+        choices=AGGREGATE_METHODS,
+        default=AGGREGATE_METHODS[0],
+        help=f"Method to aggregate benchmark results. Options: {', '.join(AGGREGATE_METHODS)} (default: %(default)s)"
     )
     parser.add_argument(
         "--verbose",
