@@ -105,7 +105,7 @@ def _parse_memory_usage_metric(data: dict[str, Any]) -> MemoryUsageMetric | None
             name_short="MEM_RSS_ANON_MAX",
             unit="Kb"
         )
-    elif "memoryRssAnonLastKb":
+    elif "memoryRssAnonLastKb" in metrics:
         memory_mode = MemoryMetricMode.LAST
         memory_rss_anon_kb = _parse_metric(
             metrics.get("memoryRssAnonLastKb"),
@@ -121,7 +121,7 @@ def _parse_memory_usage_metric(data: dict[str, Any]) -> MemoryUsageMetric | None
             name_short="MEM_RSS_FILE_MAX",
             unit="Kb"
         )
-    elif "memoryRssFileLastKb":
+    elif "memoryRssFileLastKb" in metrics:
         memory_rss_file_kb = _parse_metric(
             metrics.get("memoryRssFileLastKb"),
             name="Memory Resident Set Size File Last",
@@ -136,7 +136,7 @@ def _parse_memory_usage_metric(data: dict[str, Any]) -> MemoryUsageMetric | None
             name_short="MEM_HEAP_SIZE_MAX",
             unit="Kb"
         )
-    elif "memoryHeapSizeLastKb":
+    elif "memoryHeapSizeLastKb" in metrics:
         memory_heap_size_kb = _parse_metric(
             metrics.get("memoryHeapSizeLastKb"),
             name="Memory Heap Size LAST",
