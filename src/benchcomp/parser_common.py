@@ -36,6 +36,7 @@ class Metric:
     _min: float | None = field(init=False, default=None)
     _max: float | None = field(init=False, default=None)
     _median: float | None = field(init=False, default=None)
+    _mean: float | None = field(init=False, default=None)
     _stdev: float | None = field(init=False, default=None)
 
     @property
@@ -86,6 +87,7 @@ class Metric:
         return self._stdev
 
     def cv(self) -> float:
+        """Calculates the Coefficient of Variation (StDev / Median)."""
         if len(self._runs) < 2:
             return float("nan")
         if self.median() == 0:
@@ -104,36 +106,47 @@ class SampledMetric:
 
 @dataclass
 class StartupTimingMetric:
-    # timeToInitialDisplayMs - Time from the system receiving a launch intent to rendering the first frame of the destination Activity.
     time_to_initial_display_ms: Metric
+    """ timeToInitialDisplayMs - Time from the system receiving a launch intent to rendering the first frame of the destination Activity. """
 
-    # timeToFullDisplayMs - Time from the system receiving a launch intent until
-    # the application reports fully drawn via android.app.Activity.reportFullyDrawn.
-    #
-    # The measurement stops at the completion of rendering the first frame after (or containing) the reportFullyDrawn() call.
-    # This measurement may not be available prior to API 29.
     time_to_full_display_ms: Metric | None
+    """
+    timeToFullDisplayMs - Time from the system receiving a launch intent until
+    the application reports fully drawn via android.app.Activity.reportFullyDrawn.
+
+    The measurement stops at the completion of rendering the first frame after (or containing) the reportFullyDrawn() call.
+    This measurement may not be available prior to API 29.
+    """
 
 
 @dataclass
 class FrameTimingMetric:
-    # frameCount - How many total frames were produced. This is a secondary metric which
-    # can be used to understand why the above metrics changed. For example,
-    # when removing unneeded frames that were incorrectly invalidated to save power,
-    # frameOverrunMs and frameDurationCpuMs will often get worse, as the removed frames were trivial.
-    # Checking frameCount can be a useful indicator in such cases.
     frame_count: Metric
+    """
+    frameCount - How many total frames were produced. This is a secondary metric which
+    can be used to understand why the above metrics changed. For example,
+    when removing unneeded frames that were incorrectly invalidated to save power,
+    frameOverrunMs and frameDurationCpuMs will often get worse, as the removed frames were trivial.
+    Checking frameCount can be a useful indicator in such cases.
+    """
 
-    # frameDurationCpuMs - How much time the frame took to be produced on the CPU - on both the UI Thread, and RenderThread.
-    # Note that this doesn't account for time before the frame started (before Choreographer#doFrame), as that data isn't available in traces prior to API 31.
     frame_duration_ms: SampledMetric
+    """
+    frameDurationCpuMs - How much time the frame took to be produced on the CPU - on both the UI Thread, and RenderThread.
+    Note that this doesn't account for time before the frame started (before Choreographer#doFrame), as that data isn't available in traces prior to API 31.
+    """
 
-    # frameOverrunMs (Requires API 31) - How much time a given frame missed its deadline by.
-    # Positive numbers indicate a dropped frame and visible jank / stutter,
-    # negative numbers indicate how much faster than the deadline a frame was.
     frame_overrun_ms: SampledMetric | None
+    """
+    frameOverrunMs (Requires API 31) - How much time a given frame missed its deadline by.
+    Positive numbers indicate a dropped frame and visible jank / stutter,
+    negative numbers indicate how much faster than the deadline a frame was.
+    """
 
     def calc_freeze_frame_duration_ms(self, target: float) -> list[float]:
+        """
+        Calculates total 'freeze' time per run (time exceeding the target deadline).
+        """
         result: list[float] = []
         for run in self.frame_duration_ms.runs:
             freeze_ms: float = 0.0
@@ -152,22 +165,26 @@ class MemoryMetricMode(Enum):
 
 @dataclass
 class MemoryUsageMetric:
-    # There are two modes for measurement - Last, which represents the last observed
-    # value during an iteration, and Max, which represents the largest sample observed per measurement.
     mode: MemoryMetricMode
+    """
+    There are two modes for measurement - Last, which represents the last observed
+    value during an iteration, and Max, which represents the largest sample observed per measurement.
+    """
 
-    # memoryRssAnonKb - Anonymous resident/allocated memory owned by the process,
-    # not including memory mapped files or shared memory.
     memory_rss_anon_kb: Metric
+    """
+    memoryRssAnonKb - Anonymous resident/allocated memory owned by the process,
+    not including memory mapped files or shared memory.
+    """
 
-    # memoryRssFileKb - Memory allocated by the process to map files.
     memory_rss_file_kb: Metric
+    """ memoryRssFileKb - Memory allocated by the process to map files. """
 
-    # memoryHeapSizeKb - Heap memory allocations from the Android Runtime, sampled after each GC.
     memory_heap_size_kb: Metric
+    """ memoryHeapSizeKb - Heap memory allocations from the Android Runtime, sampled after each GC. """
 
-    # memoryGpuKb - GPU Memory allocated for the process.
     memory_gpu_kb: Metric | None
+    """ memoryGpuKb - GPU Memory allocated for the process. """
 
 
 @dataclass
@@ -257,6 +274,10 @@ class BenchmarkCompareResult:
 
 
 def calc_total_run_time(benchmarks: list[Benchmark], unit="s") -> float:
+    """
+    Calculates total runtime across all benchmarks in the desired unit.
+    Supported units: 'ns', 'ms', 's'.
+    """
     def humanize_time(time: float, unit: str) -> float:
         denom: dict[str, int] = {
             "ns": 1,
@@ -272,6 +293,15 @@ def calc_total_run_time(benchmarks: list[Benchmark], unit="s") -> float:
 
 
 def calc_total_iterations(benchmarks: list[Benchmark], type: str) -> int:
+    """
+    Sums iterations across benchmarks.
+
+    Args:
+        iteration_type: Either 'warm' for warmup or 'repeat' for main iterations.
+
+    Raises:
+        ValueError: If 'type' is neither 'warm' or 'repeat'.
+    """
     if type == "warm":
         def it_access_func(b: Benchmark):
             return b.warmup_iterations

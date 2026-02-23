@@ -44,6 +44,19 @@ logger = logging.getLogger(__name__)
 
 
 def step_fit(a: list[float], b: list[float]) -> float:
+    """
+    Calculates the step fit between two distributions.
+
+    Args:
+        a: The reference (baseline) data points.
+        b: The candidate (new) data points.
+
+    Returns:
+        The step fit score. A positive value indicates 'b' is lower than 'a'
+        potential improvement, while a negative value
+        indicates 'b' is higher than 'a' (potential regression).
+        Returns 0.0 if either list is empty or the pooled error is zero.
+    """
     def sum_squared_error(values: list[float]) -> float:
         avg = sum(values) / len(values)
         return sum((v - avg) ** 2 for v in values)
@@ -63,7 +76,26 @@ def _extract_benchmark_runs(
     bench: Benchmark,
     frametime_target: float,
 ) -> tuple[list[float], MetricMetadata]:
-    """Extracts runs and metadata based on the specific metric type."""
+    """
+    Extracts numerical samples and metadata from a raw Benchmark object.
+
+    This function acts as an adapter, converting various benchmark metric types
+    into a uniform list of floats.
+
+    Logic per Metric:
+    * StartupTimingMetric: Uses 'time_to_initial_display_ms'.
+    * FrameTimingMetric: Calculates Freeze Frame Duration (FFD) based on
+        the provided 'frametime_target'.
+    * MemoryUsageMetric: Sums 'RSS_Anon' and 'RSS_File' for each run to
+        derive total resident memory usage.
+
+    Args:
+        bench: The Benchmark instance to parse.
+        frametime_target: The frame budget target (ms) used for FFD calculation.
+
+    Returns:
+        A tuple containing (list of numerical values, MetricMetadata).
+    """
     data = bench.data
 
     if isinstance(data, StartupTimingMetric):
@@ -85,7 +117,22 @@ def _extract_benchmark_runs(
 
 
 def _apply_aggregation(runs: list[list[float]], method: str) -> list[float]:
-    """Aggregates multiple runs into a single representative list."""
+    """
+    Reduces multiple experimental runs into a single representative sample.
+
+    Aggregation Strategies:
+    * 'none': Validates that only one run exists and returns it.
+    * 'concat': Merges all run data into one large distribution.
+    * 'mean'/'median'/'min'/'max': Reduces each individual run to a
+        single scalar, returning a list of scalars.
+
+    Args:
+        runs: A list of lists, where each inner list represents one benchmark run.
+        method: The strategy string (e.g., "median", "concat").
+
+    Raises:
+        ValueError: If 'none' is chosen with >1 run or if the method is unknown.
+    """
     if method == "none":
         if len(runs) != 1:
             raise ValueError("Aggregation 'none' requires exactly one benchmark run")
@@ -107,7 +154,7 @@ def _apply_aggregation(runs: list[list[float]], method: str) -> list[float]:
     return [dispatch[method](run) for run in runs]
 
 
-def _compare_runs(
+def _run_statistical_test(
     method: str,
     a_runs: list[float],
     b_runs: list[float],
@@ -115,6 +162,19 @@ def _compare_runs(
     *args,
     **kwargs,
 ) -> tuple[Verdict, Any]:
+    """
+    Executes a statistical significance test between two samples.
+
+    Args:
+        method: "stepfit" or "mannwhitneyu".
+        a_runs: Baseline data sample.
+        b_runs: Candidate data sample.
+        threshold: The significance cutoff (e.g., alpha for p-value).
+
+    Returns:
+        A tuple of (Verdict, result_value), where result_value is
+        either the step fit score or the p-value.
+    """
     verdict: Verdict = Verdict.NOT_SIGNIFICANT
     compare_result = None
     match method:
@@ -172,6 +232,18 @@ def compare_benchmark(
     *args,
     **kwargs,
 ) -> BenchmarkCompareResult | None:
+    """
+    Args:
+        a: Baseline benchmark(s).
+        b: Candidate benchmark(s).
+        method: Statistical test to use ("stepfit" or "mannwhitneyu").
+        threshold: The significance threshold.
+        frametime_target: The MS target for frame-based metrics.
+        aggregate: The method to combine multiple runs.
+
+    Returns:
+        A BenchmarkCompareResult if successful, or None if data collection failed.
+    """
     def collect(benchmarks: list[Benchmark]) -> tuple[list[list[float]], MetricMetadata]:
         raw, meta = [], MetricMetadata("Unknown", "Unknown", "")
         for b in benchmarks:
@@ -200,7 +272,7 @@ def compare_benchmark(
         a_final = _apply_aggregation(a_raw, aggregate)
         b_final = _apply_aggregation(b_raw, aggregate)
 
-        verdict, compare_result = _compare_runs(
+        verdict, compare_result = _run_statistical_test(
             method=method,
             a_runs=a_final,
             b_runs=b_final,
@@ -209,7 +281,7 @@ def compare_benchmark(
             **kwargs,
         )
     except Exception as e:
-        logger.warning(f"failed to compare benchmark '{ref_bench.name}' metric '{metadata.name}', skipping. ({e})'")
+        logger.exception(f"failed to compare benchmark '{ref_bench.name}' metric '{metadata.name}', skipping. ({e})'")
         return None
 
     return BenchmarkCompareResult(
