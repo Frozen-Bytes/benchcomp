@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from statistics import mean, median, stdev
-from typing import Self
+from typing import Any, Self
 
 
 @dataclass
@@ -190,6 +192,68 @@ class BenchmarkReport:
     filepath: Path
     device: Device = field(default_factory=Device)
     benchmarks: dict[str, Benchmark] = field(default_factory=dict)
+
+
+@dataclass
+class AnalysisReport:
+    title: str = ""
+    baseline_reports: list[BenchmarkReport] = field(default_factory=list)
+    candidate_reports: list[BenchmarkReport] = field(default_factory=list)
+    results: list[BenchmarkCompareResult] = field(default_factory=list)
+
+
+class Verdict(Enum):
+    NOT_SIGNIFICANT = 0
+    IMPROVEMENT = 1
+    REGRESSION = 2
+
+
+@dataclass
+class BenchmarkCompareResult:
+    a_bench_ref: list[Benchmark]
+    b_bench_ref: list[Benchmark]
+    a_metric: Metric
+    b_metric: Metric
+    method: str
+    verdict: Verdict
+    result: Any
+
+    @property
+    def benchmark_name(self) -> str:
+        return self.a_bench_ref[0].name
+
+    @property
+    def benchmark_class(self) -> str:
+        return self.a_bench_ref[0].class_name
+
+    @property
+    def metric_metadata(self) -> MetricMetadata:
+        return self.a_metric.metadata
+
+    def is_compatible_with(self, other: Self) -> bool:
+        is_same_benchmark: bool = True
+        ref_bench = self.a_bench_ref[0]
+        for bench in self.a_bench_ref + self.b_bench_ref:
+            is_same_benchmark &= ref_bench.is_same_benchmark(bench)
+
+        return (
+            is_same_benchmark
+            and (self.a_metric.metadata == other.a_metric.metadata)
+            and (self.b_metric.metadata == other.b_metric.metadata)
+            and (self.method == other.method)
+            and (type(self.result) is type(other.result))
+        )
+
+    @staticmethod
+    def _calc_total_run_time_ms(benchmarks: list[Benchmark]) -> float:
+        def to_seconds(time_ns: float):
+            return time_ns / (1000 * 1000 * 1000)
+
+        time:float = 0.0
+        for b in benchmarks:
+            time += to_seconds(b.total_run_time_ns)
+        return time
+
 
 
 def calc_total_run_time(benchmarks: list[Benchmark], unit="s") -> float:

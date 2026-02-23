@@ -1,25 +1,36 @@
 import logging
 import math
-from dataclasses import dataclass
-from enum import Enum
 from itertools import chain
 from statistics import mean, median
-from typing import Any, Self
+from typing import Any
 
 from scipy.stats import mannwhitneyu
 
 from benchcomp.parser_common import (
     Benchmark,
+    BenchmarkCompareResult,
     FrameTimingMetric,
     MemoryUsageMetric,
     Metric,
     MetricMetadata,
     StartupTimingMetric,
+    Verdict,
 )
 
 DEFAULT_STEP_FIT_THRESHOLD: float = 25.0
 DEFAULT_P_VALUE_THRESHOLD: float = 0.01
 DEFAULT_FRAME_TIME_TARGET_MS: float = 1000 / 60
+
+COMPARE_METHODS: dict[str, dict[str, str]] = {
+    "stepfit": {
+        "header": "Step Fit",
+        "state": "fit",
+    },
+    "mannwhitneyu": {
+        "header": "Mann-Whitney U-Test",
+        "state": "pval",
+    },
+}
 
 AGGREGATE_METHODS: list[str] = [
     "none",
@@ -30,59 +41,6 @@ AGGREGATE_METHODS: list[str] = [
 ]
 
 logger = logging.getLogger(__name__)
-
-
-class Verdict(Enum):
-    NOT_SIGNIFICANT = 0
-    IMPROVEMENT = 1
-    REGRESSION = 2
-
-
-@dataclass
-class BenchmarkCompareResult:
-    a_bench_ref: list[Benchmark]
-    b_bench_ref: list[Benchmark]
-    a_metric: Metric
-    b_metric: Metric
-    method: str
-    verdict: Verdict
-    result: Any
-
-    @property
-    def benchmark_name(self) -> str:
-        return self.a_bench_ref[0].name
-
-    @property
-    def benchmark_class(self) -> str:
-        return self.a_bench_ref[0].class_name
-
-    @property
-    def metric_metadata(self) -> MetricMetadata:
-        return self.a_metric.metadata
-
-    def is_compatible_with(self, other: Self) -> bool:
-        is_same_benchmark: bool = True
-        ref_bench = self.a_bench_ref[0]
-        for bench in self.a_bench_ref + self.b_bench_ref:
-            is_same_benchmark &= ref_bench.is_same_benchmark(bench)
-
-        return (
-            is_same_benchmark
-            and (self.a_metric.metadata == other.a_metric.metadata)
-            and (self.b_metric.metadata == other.b_metric.metadata)
-            and (self.method == other.method)
-            and (type(self.result) is type(other.result))
-        )
-
-    @staticmethod
-    def _calc_total_run_time_ms(benchmarks: list[Benchmark]) -> float:
-        def to_seconds(time_ns: float):
-            return time_ns / (1000 * 1000 * 1000)
-
-        time:float = 0.0
-        for b in benchmarks:
-            time += to_seconds(b.total_run_time_ns)
-        return time
 
 
 def step_fit(a: list[float], b: list[float]) -> float:
