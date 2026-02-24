@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 
+from benchcomp.__version__ import __version__
 from benchcomp.compare import (
     AGGREGATE_METHODS,
     DEFAULT_FRAME_TIME_TARGET_MS,
@@ -67,6 +68,11 @@ def parse_commandline_args() -> argparse.Namespace:
         action="store_true",
         default=False,
         help="Print additional metric information"
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
 
     return parser.parse_args()

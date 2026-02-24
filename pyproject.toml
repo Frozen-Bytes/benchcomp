@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "benchcomp"
-version = "1.0.0"
+dynamic = ["version"]
 authors = [
     {name = "Frozen Bytes"},
 ]
@@ -25,6 +25,8 @@ license-files = ["LICEN[CS]E*"]
 Repository = "https://github.com/Frozen-Bytes/benchcomp"
 Issues = "https://github.com/Frozen-Bytes/benchcomp/issues"
 
-
 [project.scripts]
 benchcomp = "benchcomp.__main__:main"
+
+[tool.hatch.version]
+path = "src/benchcomp/__version__.py"
