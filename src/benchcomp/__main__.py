@@ -5,7 +5,7 @@ from pathlib import Path
 
 from benchcomp.common import AnalysisReport, Benchmark, BenchmarkReport
 from benchcomp.compare import COMPARE_METHODS, compare_benchmarks
-from benchcomp.console_renderer import print_file_pair_mapping, render_to_console
+from benchcomp.console_renderer import print_file_pair_mapping, print_analysis_reports
 from benchcomp.parser_cli import parse_commandline_args
 from benchcomp.parser_macrobenchmark import load_macrobenchmark_report
 
@@ -136,7 +136,7 @@ def main() -> int:
 
         analysis_reports.append(analysis_report)
 
-    render_to_console(analysis_reports, is_verbose=is_verbose)
+    print_analysis_reports(analysis_reports, is_verbose=is_verbose)
 
     return 0
 

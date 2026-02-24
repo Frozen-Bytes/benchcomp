@@ -315,3 +315,11 @@ def calc_total_iterations(benchmarks: list[Benchmark], iteration_type: str = "re
     for b in benchmarks:
         iters += it_access_func(b)
     return iters
+
+
+def get_unique_devices(devices: list[Device]) -> list[Device]:
+    unique_devices: list[Device] = []
+    for device in devices:
+        if device not in unique_devices:
+            unique_devices.append(device)
+    return unique_devices
