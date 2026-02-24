@@ -2,10 +2,10 @@ from statistics import mean, median, stdev
 
 import pytest
 
-from benchcomp.parser_common import (
+from benchcomp.common import (
     Benchmark,
     FrameTimingMetric,
-    MemoryMetricMode,
+    MemorySamplingMode,
     MemoryUsageMetric,
     Metric,
     StartupTimingMetric,
@@ -48,7 +48,7 @@ def test_parse_device_basic():
     assert device.name == "generic_x86_64_arm64"
     assert device.model == "sdk_gphone_x86_64"
     assert device.cpu_cores == 2
-    assert device.mem_size == 4_120_588_288 // (1024 * 1024)  # MB
+    assert device.mem_size_mb == 4_120_588_288 // (1024 * 1024)
     assert device.emulated is True
 
 
@@ -114,7 +114,7 @@ def test_parse_startup_benchmark():
     assert benchmark is not None
     assert benchmark.name == "StartupBenchmark"
     assert benchmark.class_name == "com.test.app.startup.StartupBenchmark"
-    assert benchmark.total_run_time_ns == 1_000_000_000
+    assert benchmark.total_runtime_ns == 1_000_000_000
     assert benchmark.warmup_iterations == 2
     assert benchmark.repeat_iterations == 3
 
@@ -184,7 +184,7 @@ def test_parse_frame_timing_benchmark():
     assert benchmark is not None
     assert benchmark.name == "FrameTimingBenchmark"
     assert benchmark.class_name == "com.test.app.startup.FrameTimingBenchmark"
-    assert benchmark.total_run_time_ns == 1_000_000_000
+    assert benchmark.total_runtime_ns == 1_000_000_000
     assert benchmark.warmup_iterations == 2
     assert benchmark.repeat_iterations == 3
 
@@ -237,14 +237,14 @@ def test_parse_memory_benchmark_max_mode():
     assert benchmark is not None
     assert benchmark.name == "MemoryBenchmark"
     assert benchmark.class_name == "com.test.app.startup.MemoryBenchmark"
-    assert benchmark.total_run_time_ns == 1_000_000_000
+    assert benchmark.total_runtime_ns == 1_000_000_000
     assert benchmark.warmup_iterations == 2
     assert benchmark.repeat_iterations == 3
 
     # Data
     assert isinstance(benchmark.data, MemoryUsageMetric)
 
-    assert benchmark.data.mode == MemoryMetricMode.MAX
+    assert benchmark.data.sampling_mode == MemorySamplingMode.MAX
 
     assert benchmark.data.memory_rss_anon_kb.metadata.name == "Memory Resident Set Size Anonymous Max"
     assert benchmark.data.memory_rss_anon_kb.metadata.name_short == "MEM_RSS_ANON_MAX"
@@ -296,14 +296,14 @@ def test_parse_memory_benchmark_last_mode():
     assert benchmark is not None
     assert benchmark.name == "MemoryBenchmark"
     assert benchmark.class_name == "com.test.app.startup.MemoryBenchmark"
-    assert benchmark.total_run_time_ns == 1_000_000_000
+    assert benchmark.total_runtime_ns == 1_000_000_000
     assert benchmark.warmup_iterations == 2
     assert benchmark.repeat_iterations == 3
 
     # Data
     assert isinstance(benchmark.data, MemoryUsageMetric)
 
-    assert benchmark.data.mode == MemoryMetricMode.LAST
+    assert benchmark.data.sampling_mode == MemorySamplingMode.LAST
 
     assert benchmark.data.memory_rss_anon_kb.metadata.name == "Memory Resident Set Size Anonymous Last"
     assert benchmark.data.memory_rss_anon_kb.metadata.name_short == "MEM_RSS_ANON_LAST"

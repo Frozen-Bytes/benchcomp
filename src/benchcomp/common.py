@@ -14,7 +14,7 @@ class Device:
     model: str = ""
     cpu_cores: int = 0
     cpu_freq: int = 0
-    mem_size: int = 0
+    mem_size_mb: int = 0
     emulated: bool = True
 
 
@@ -157,7 +157,7 @@ class FrameTimingMetric:
         return result
 
 
-class MemoryMetricMode(Enum):
+class MemorySamplingMode(Enum):
     UNKNOWN = 0
     LAST = 1
     MAX = 2
@@ -165,7 +165,7 @@ class MemoryMetricMode(Enum):
 
 @dataclass
 class MemoryUsageMetric:
-    mode: MemoryMetricMode
+    sampling_mode: MemorySamplingMode
     """
     There are two modes for measurement - Last, which represents the last observed
     value during an iteration, and Max, which represents the largest sample observed per measurement.
@@ -191,7 +191,7 @@ class MemoryUsageMetric:
 class Benchmark:
     name: str
     class_name: str
-    total_run_time_ns: int
+    total_runtime_ns: int
     warmup_iterations: int
     repeat_iterations: int
     data: StartupTimingMetric | FrameTimingMetric | MemoryUsageMetric | None
@@ -206,7 +206,7 @@ class Benchmark:
 
 @dataclass
 class BenchmarkReport:
-    filepath: Path
+    filepath: Path = field(default_factory=Path)
     device: Device = field(default_factory=Device)
     benchmarks: dict[str, Benchmark] = field(default_factory=dict)
 
@@ -216,7 +216,7 @@ class AnalysisReport:
     title: str = ""
     baseline_reports: list[BenchmarkReport] = field(default_factory=list)
     candidate_reports: list[BenchmarkReport] = field(default_factory=list)
-    results: list[BenchmarkCompareResult] = field(default_factory=list)
+    comparisons: list[BenchmarkComparisonResult] = field(default_factory=list)
 
 
 class Verdict(Enum):
@@ -226,14 +226,14 @@ class Verdict(Enum):
 
 
 @dataclass
-class BenchmarkCompareResult:
+class BenchmarkComparisonResult:
     a_bench_ref: list[Benchmark]
     b_bench_ref: list[Benchmark]
     a_metric: Metric
     b_metric: Metric
-    method: str
+    comparison_method: str
+    comparison_result: Any
     verdict: Verdict
-    result: Any
 
     @property
     def benchmark_name(self) -> str:
@@ -257,8 +257,8 @@ class BenchmarkCompareResult:
             is_same_benchmark
             and (self.a_metric.metadata == other.a_metric.metadata)
             and (self.b_metric.metadata == other.b_metric.metadata)
-            and (self.method == other.method)
-            and (type(self.result) is type(other.result))
+            and (self.comparison_method == other.comparison_method)
+            and (type(self.comparison_result) is type(other.comparison_result))
         )
 
     @staticmethod
@@ -268,31 +268,31 @@ class BenchmarkCompareResult:
 
         time:float = 0.0
         for b in benchmarks:
-            time += to_seconds(b.total_run_time_ns)
+            time += to_seconds(b.total_runtime_ns)
         return time
 
 
 
-def calc_total_run_time(benchmarks: list[Benchmark], unit="s") -> float:
+def calc_total_runtime(benchmarks: list[Benchmark], target_unit: str = "s") -> float:
     """
     Calculates total runtime across all benchmarks in the desired unit.
     Supported units: 'ns', 'ms', 's'.
     """
     def humanize_time(time: float, unit: str) -> float:
-        denom: dict[str, int] = {
+        unit_divisors: dict[str, int] = {
             "ns": 1,
             "ms": 1_000_000,
             "s": 1_000_000_000,
         }
-        return time / denom[unit]
+        return time / unit_divisors[unit]
 
     time: float = 0.0
     for b in benchmarks:
-        time += humanize_time(b.total_run_time_ns, unit)
+        time += humanize_time(b.total_runtime_ns, target_unit)
     return time
 
 
-def calc_total_iterations(benchmarks: list[Benchmark], type: str) -> int:
+def calc_total_iterations(benchmarks: list[Benchmark], iteration_type: str = "repeat") -> int:
     """
     Sums iterations across benchmarks.
 
@@ -302,14 +302,14 @@ def calc_total_iterations(benchmarks: list[Benchmark], type: str) -> int:
     Raises:
         ValueError: If 'type' is neither 'warm' or 'repeat'.
     """
-    if type == "warm":
+    if iteration_type == "warm":
         def it_access_func(b: Benchmark):
             return b.warmup_iterations
-    elif type == "repeat":
+    elif iteration_type == "repeat":
         def it_access_func(b: Benchmark):
             return b.repeat_iterations
     else:
-        raise ValueError(f"Unknown iteration type '{type}'")
+        raise ValueError(f"Unknown iteration type '{iteration_type}'")
 
     iters: int = 0
     for b in benchmarks:

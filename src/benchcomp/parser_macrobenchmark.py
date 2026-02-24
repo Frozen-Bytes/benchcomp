@@ -1,5 +1,6 @@
 import json
 import logging
+from json import JSONDecodeError
 from pathlib import Path
 from typing import Any
 
@@ -8,7 +9,7 @@ from benchcomp.common import (
     BenchmarkReport,
     Device,
     FrameTimingMetric,
-    MemoryMetricMode,
+    MemorySamplingMode,
     MemoryUsageMetric,
     Metric,
     MetricMetadata,
@@ -27,7 +28,7 @@ def _parse_device(data: dict[str, Any]) -> Device:
         model = build.get("model", ""),
         cpu_cores = data.get("cpuCoreCount", 0),
         cpu_freq = data.get("cpuMaxFreqHz", 0),
-        mem_size = data.get("memTotalBytes", 0) // (1024 * 1024),
+        mem_size_mb = data.get("memTotalBytes", 0) // (1024 * 1024),
         emulated=True
     )
 
@@ -100,8 +101,8 @@ def _parse_memory_usage_metric(data: dict[str, Any]) -> MemoryUsageMetric | None
         ("memoryHeapSize", "Memory Heap Size", "MEM_HEAP_SIZE"),
         ("memoryGpu", "Memory GPU", "MEM_GPU"),
     ]
-    mode = MemoryMetricMode.MAX if "memoryRssAnonMaxKb" in metrics else MemoryMetricMode.LAST
-    suffix = "MaxKb" if mode == MemoryMetricMode.MAX else "LastKb"
+    mode = MemorySamplingMode.MAX if "memoryRssAnonMaxKb" in metrics else MemorySamplingMode.LAST
+    suffix = "MaxKb" if mode == MemorySamplingMode.MAX else "LastKb"
 
     results: dict[str, Metric] = {}
     for key, full_name, short_name, in METRIC_CONFIGS:
@@ -117,7 +118,7 @@ def _parse_memory_usage_metric(data: dict[str, Any]) -> MemoryUsageMetric | None
             return None
 
     return MemoryUsageMetric(
-        mode=mode,
+        sampling_mode=mode,
         memory_rss_anon_kb=results["memoryRssAnon"],
         memory_rss_file_kb=results["memoryRssFile"],
         memory_heap_size_kb=results["memoryHeapSize"],
@@ -148,31 +149,40 @@ def _parse_benchmark(data: dict[str, Any]) -> Benchmark | None:
     return Benchmark(
         name=name,
         class_name=data.get("className", ""),
-        total_run_time_ns=data.get("totalRunTimeNs", 0),
+        total_runtime_ns=data.get("totalRunTimeNs", 0),
         warmup_iterations=data.get("warmupIterations", 0),
         repeat_iterations=data.get("repeatIterations", 0),
         data=bench_data,
     )
 
 
-def parse_macrobechmark_report(path: Path | str) -> BenchmarkReport | None:
-    report: BenchmarkReport = BenchmarkReport(filepath=Path(path))
+def parse_macrobenchmark_report(data: dict[str, Any]) -> BenchmarkReport:
+    report: BenchmarkReport = BenchmarkReport()
+
+    report.device = _parse_device(data.get("context", {}))
+    benchmarks = data.get("benchmarks", [])
+    for bench_obj in benchmarks:
+        try:
+            benchmark = _parse_benchmark(bench_obj)
+            if benchmark is not None:
+                report.benchmarks[benchmark.name] = benchmark
+        except Exception as e:
+            name = bench_obj.get("name", "")
+            logger.warning(f"failed to parse benchmark '{name}', skipping. ({e})")
+
+    return report
+
+
+def load_macrobenchmark_report(path: Path | str) -> BenchmarkReport | None:
+    report: BenchmarkReport | None = None
+
     with open(path, "r") as file:
         try:
             root = json.load(file)
-            report.device = _parse_device(root.get("context", {}))
-            benchmarks = root.get("benchmarks", [])
-            for bench_obj in benchmarks:
-                try:
-                    benchmark = _parse_benchmark(bench_obj)
-                    if benchmark is not None:
-                        report.benchmarks[benchmark.name] = benchmark
-                except Exception as e:
-                    name = bench_obj.get("name", "")
-                    logger.warning(f"failed to parse benchmark '{name}', skipping. ({e})")
-
-        except json.JSONDecodeError | UnicodeDecodeError:
-            logger.error(f"failed to parse json file '{path}', invalid JSON document")
+            report = parse_macrobenchmark_report(root)
+            report.filepath = Path(path)
+        except JSONDecodeError | UnicodeDecodeError:
+            logger.exception(f"failed to parse json file '{path}', invalid JSON document")
             return None
 
     return report

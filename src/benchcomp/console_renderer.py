@@ -10,9 +10,9 @@ from benchcomp.common import (
     Device,
     MetricMetadata,
     calc_total_iterations,
-    calc_total_run_time,
+    calc_total_runtime,
 )
-from benchcomp.compare import COMPARE_METHODS, BenchmarkCompareResult, Verdict
+from benchcomp.compare import COMPARE_METHODS, BenchmarkComparisonResult, Verdict
 
 
 def print_file_pair_mapping(baseline: list[Path], candidate: list[Path]) -> None:
@@ -79,13 +79,13 @@ def print_device_specifications(device: Device) -> None:
     print(f"  Model    : {device.model}")
     print(f"  Cores    : {device.cpu_cores}")
     print(f"  Core Freq: {device.cpu_freq}Hz")
-    print(f"  Memory   : {device.mem_size}MB")
+    print(f"  Memory   : {device.mem_size_mb}MB")
     print(f"  Emulator : {device.emulated}")
 
 
 def print_compare_method_results(
-    results: list[BenchmarkCompareResult],
-    total_run_time_s: float | None
+    results: list[BenchmarkComparisonResult],
+    total_runtime_s: float | None
 ) -> None:
     ref_cr = results[0]
 
@@ -93,12 +93,12 @@ def print_compare_method_results(
     benchmark_class: str = ref_cr.benchmark_class
     metric_metadata: MetricMetadata = ref_cr.metric_metadata
 
-    a_total_rum_time_s = calc_total_run_time(ref_cr.a_bench_ref)
-    b_total_rum_time_s = calc_total_run_time(ref_cr.b_bench_ref)
-    ab_run_time_s = a_total_rum_time_s + b_total_rum_time_s
-    run_time_percent: str = ""
-    if total_run_time_s:
-        run_time_percent = f" ({(ab_run_time_s / total_run_time_s) * 100:.2f}%)"
+    a_total_runtime_s = calc_total_runtime(ref_cr.a_bench_ref)
+    b_total_runtime_s = calc_total_runtime(ref_cr.b_bench_ref)
+    ab_runtime_s = a_total_runtime_s + b_total_runtime_s
+    runtime_percent: str = ""
+    if total_runtime_s:
+        runtime_percent = f" ({(ab_runtime_s / total_runtime_s) * 100:.2f}%)"
 
     a_total_warm_iters = calc_total_iterations(ref_cr.a_bench_ref, "warm")
     b_total_warm_iters = calc_total_iterations(ref_cr.b_bench_ref, "warm")
@@ -112,12 +112,12 @@ def print_compare_method_results(
     statistics: list[str] = []
 
     for r in results:
-        verdicts.append(f"{r.method}{r.verdict}")
-        statistics.append(f"{r.method}: {r.result:.3f}")
+        verdicts.append(f"{r.comparison_method}{r.verdict}")
+        statistics.append(f"{r.comparison_method}: {r.comparison_result:.3f}")
 
     print(f"> Benchmark '{benchmark_name}':")
     print(f"    Class               : {benchmark_class}")
-    print(f"    Run Time (s)        : {ab_run_time_s:.3f} (Baseline: {a_total_rum_time_s:.3f}, Candidate: {b_total_rum_time_s:.3f}){run_time_percent}")
+    print(f"    Run Time (s)        : {ab_runtime_s:.3f} (Baseline: {a_total_runtime_s:.3f}, Candidate: {b_total_runtime_s:.3f}){runtime_percent}")
     print(f"    Warmup   Iterations : (Baseline: {a_total_warm_iters}, Candidate: {b_total_warm_iters})")
     print(f"    Repeated Iterations : (Baseline: {a_total_repeat_iters}, Candidate: {b_total_repeat_iters})")
     print(f"    Metric              : {metric_metadata.name} ({metric_metadata.name_short})")
@@ -134,7 +134,7 @@ def print_report_paths(label: str, reports: list[BenchmarkReport]):
 
 
 def tabulate_(
-    statistics_results: list[BenchmarkCompareResult],
+    statistics_results: list[BenchmarkComparisonResult],
     stat_label: str,
     title: str = "",
 ) -> str:
@@ -183,7 +183,7 @@ def tabulate_(
             result.a_metric.median(),
             result.b_metric.median(),
             infix = _format_verdict(result.verdict),
-            suffix = f"({stat_label}: {result.result:.3f})"
+            suffix = f"({stat_label}: {result.comparison_result:.3f})"
         )
         v_min   = _format_cell(result.a_metric.min(), result.b_metric.min())
         v_max   = _format_cell(result.a_metric.max(), result.b_metric.max())
@@ -243,24 +243,24 @@ def render_to_console(
         # print()
         #
 
-        results_by_name: dict[str, list[BenchmarkCompareResult]] = defaultdict(list)
-        results_by_method: dict[str, list[BenchmarkCompareResult]] = defaultdict(list)
+        comparisons_by_name: dict[str, list[BenchmarkComparisonResult]] = defaultdict(list)
+        comparisons_by_method: dict[str, list[BenchmarkComparisonResult]] = defaultdict(list)
 
-        for res in r.results:
-            results_by_name[res.benchmark_name].append(res)
-            results_by_method[res.method].append(res)
+        for comparison in r.comparisons:
+            comparisons_by_name[comparison.benchmark_name].append(comparison)
+            comparisons_by_method[comparison.comparison_method].append(comparison)
 
         if is_verbose:
-            total_run_time: float = sum(
-                calc_total_run_time(list(rr.benchmarks.values()))
+            total_runtime: float = sum(
+                calc_total_runtime(list(rr.benchmarks.values()))
                 for rr in r.baseline_reports + r.candidate_reports
             )
 
-            for bench_results in results_by_name.values():
-                print_compare_method_results(bench_results, total_run_time_s=total_run_time)
+            for comparison in comparisons_by_name.values():
+                print_compare_method_results(comparison, total_runtime_s=total_runtime)
                 print()
 
-        for method, bench_results in results_by_method.items():
+        for method, comparison in comparisons_by_method.items():
             config = COMPARE_METHODS[method]
-            print(tabulate_(bench_results, config["state"], config["header"]))
+            print(tabulate_(comparison, config["state"], config["header"]))
             print()

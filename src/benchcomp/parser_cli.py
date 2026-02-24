@@ -3,7 +3,8 @@ from pathlib import Path
 
 from benchcomp.__version__ import __version__
 from benchcomp.compare import (
-    AGGREGATE_METHODS,
+    AGGREGATE_FUNCTIONS,
+    DEFAULT_AGGREGATE_FUNCTION,
     DEFAULT_FRAME_TIME_TARGET_MS,
     DEFAULT_P_VALUE_THRESHOLD,
     DEFAULT_STEP_FIT_THRESHOLD,
@@ -58,9 +59,9 @@ def parse_commandline_args() -> argparse.Namespace:
         dest="aggregate_method",
         type=str,
         metavar="VALUE",
-        choices=AGGREGATE_METHODS,
-        default=AGGREGATE_METHODS[0],
-        help=f"Method to aggregate benchmark results. Options: {', '.join(AGGREGATE_METHODS)} (default: %(default)s)"
+        choices=AGGREGATE_FUNCTIONS.keys(),
+        default=DEFAULT_AGGREGATE_FUNCTION,
+        help=f"Method to aggregate benchmark results. Options: {', '.join(AGGREGATE_FUNCTIONS)} (default: %(default)s)"
     )
     parser.add_argument(
         "--verbose",
