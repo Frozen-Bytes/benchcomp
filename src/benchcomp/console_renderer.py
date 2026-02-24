@@ -4,8 +4,7 @@ from typing import Any
 
 from tabulate import tabulate
 
-from benchcomp.compare import COMPARE_METHODS, BenchmarkCompareResult, Verdict
-from benchcomp.parser_common import (
+from benchcomp.common import (
     AnalysisReport,
     BenchmarkReport,
     Device,
@@ -13,6 +12,7 @@ from benchcomp.parser_common import (
     calc_total_iterations,
     calc_total_run_time,
 )
+from benchcomp.compare import COMPARE_METHODS, BenchmarkCompareResult, Verdict
 
 
 def print_file_pair_mapping(baseline: list[Path], candidate: list[Path]) -> None:

@@ -3,10 +3,10 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+from benchcomp.common import AnalysisReport, Benchmark, BenchmarkReport
 from benchcomp.compare import COMPARE_METHODS, compare_benchmark
 from benchcomp.console_renderer import print_file_pair_mapping, render_to_console
 from benchcomp.parser_cli import parse_commandline_args
-from benchcomp.parser_common import AnalysisReport, Benchmark, BenchmarkReport
 from benchcomp.parser_macrobenchmark import parse_macrobechmark_report
 
 logger = logging.getLogger(__name__)

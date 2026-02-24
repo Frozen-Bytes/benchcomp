@@ -6,7 +6,7 @@ from typing import Any
 
 from scipy.stats import mannwhitneyu
 
-from benchcomp.parser_common import (
+from benchcomp.common import (
     Benchmark,
     BenchmarkCompareResult,
     FrameTimingMetric,

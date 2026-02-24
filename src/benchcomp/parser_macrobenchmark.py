@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from benchcomp.parser_common import (
+from benchcomp.common import (
     Benchmark,
     BenchmarkReport,
     Device,
