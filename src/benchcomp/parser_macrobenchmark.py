@@ -94,107 +94,54 @@ def _parse_frame_timing_metric(data: dict[str, Any]) -> FrameTimingMetric | None
 def _parse_memory_usage_metric(data: dict[str, Any]) -> MemoryUsageMetric | None:
     metrics = data.get("metrics", {})
 
-    memory_mode: MemoryMetricMode = MemoryMetricMode.UNKNOWN
-    memory_rss_anon_kb: Metric | None = None
-    memory_rss_file_kb: Metric | None = None
-    memory_heap_size_kb: Metric | None = None
-    memory_gpu_kb: Metric | None = None
+    METRIC_CONFIGS = [
+        ("memoryRssAnon", "Memory Resident Set Size Anonymous", "MEM_RSS_ANON"),
+        ("memoryRssFile", "Memory Resident Set Size File", "MEM_RSS_FILE"),
+        ("memoryHeapSize", "Memory Heap Size", "MEM_HEAP_SIZE"),
+        ("memoryGpu", "Memory GPU", "MEM_GPU"),
+    ]
+    mode = MemoryMetricMode.MAX if "memoryRssAnonMaxKb" in metrics else MemoryMetricMode.LAST
+    suffix = "MaxKb" if mode == MemoryMetricMode.MAX else "LastKb"
 
-    if "memoryRssAnonMaxKb" in metrics:
-        memory_mode = MemoryMetricMode.MAX
-        memory_rss_anon_kb = _parse_metric(
-            metrics.get("memoryRssAnonMaxKb"),
-            name="Memory Resident Set Size Anonymous Max",
-            name_short="MEM_RSS_ANON_MAX",
-            unit="Kb"
-        )
-    elif "memoryRssAnonLastKb" in metrics:
-        memory_mode = MemoryMetricMode.LAST
-        memory_rss_anon_kb = _parse_metric(
-            metrics.get("memoryRssAnonLastKb"),
-            name="Memory Resident Set Size Anonymous Last",
-            name_short="MEM_RSS_ANON_LAST",
-            unit="Kb"
+    results: dict[str, Metric] = {}
+    for key, full_name, short_name, in METRIC_CONFIGS:
+        metric_key = f"{key}{suffix}"
+        results[key] = _parse_metric(
+            metrics.get(metric_key),
+            name=f"{full_name} {str(mode.name).title()}",
+            name_short=f"{short_name}_{str(mode.name).upper()}",
+            unit="Kb",
         )
 
-    if "memoryRssFileMaxKb" in metrics:
-        memory_rss_file_kb = _parse_metric(
-            metrics.get("memoryRssFileMaxKb"),
-            name="Memory Resident Set Size File Max",
-            name_short="MEM_RSS_FILE_MAX",
-            unit="Kb"
-        )
-    elif "memoryRssFileLastKb" in metrics:
-        memory_rss_file_kb = _parse_metric(
-            metrics.get("memoryRssFileLastKb"),
-            name="Memory Resident Set Size File Last",
-            name_short="MEM_RSS_FILE_Last",
-            unit="Kb"
-        )
-
-    if "memoryHeapSizeMaxKb" in metrics:
-        memory_heap_size_kb = _parse_metric(
-            metrics.get("memoryHeapSizeMaxKb"),
-            name="Memory Heap Size Max",
-            name_short="MEM_HEAP_SIZE_MAX",
-            unit="Kb"
-        )
-    elif "memoryHeapSizeLastKb" in metrics:
-        memory_heap_size_kb = _parse_metric(
-            metrics.get("memoryHeapSizeLastKb"),
-            name="Memory Heap Size LAST",
-            name_short="MEM_HEAP_SIZE_LAST",
-            unit="Kb"
-        )
-
-    if "memoryGpuMaxKb" in metrics:
-        memory_gpu_kb = _parse_metric(
-            metrics.get("memoryGpuMaxKb"),
-            name="Memory GPU Max",
-            name_short="MEM_GPU_MAX",
-            unit="Kb"
-        )
-    elif "memoryGpuLastKb" in metrics:
-        memory_gpu_kb = _parse_metric(
-            metrics.get("memoryGpuLastKb"),
-            name="Memory GPU Last",
-            name_short="MEM_GPU_LAST",
-            unit="Kb"
-        )
-
-    if (
-        memory_rss_anon_kb is None
-        or memory_rss_file_kb is None
-        or memory_heap_size_kb is None
-    ):
-        return None
+    if any(results[k] is None for k in ["memoryRssAnon", "memoryRssFile", "memoryHeapSize"]):
+            return None
 
     return MemoryUsageMetric(
-        mode=memory_mode,
-        memory_rss_anon_kb=memory_rss_anon_kb,
-        memory_rss_file_kb=memory_rss_file_kb,
-        memory_heap_size_kb=memory_heap_size_kb,
-        memory_gpu_kb=memory_gpu_kb,
+        mode=mode,
+        memory_rss_anon_kb=results["memoryRssAnon"],
+        memory_rss_file_kb=results["memoryRssFile"],
+        memory_heap_size_kb=results["memoryHeapSize"],
+        memory_gpu_kb=results["memoryGpu"],
     )
 
 def _parse_benchmark(data: dict[str, Any]) -> Benchmark | None:
     name: str = data.get("name", "")
     metrics_json = data.get("metrics", {})
-    bench_data: StartupTimingMetric | FrameTimingMetric | MemoryUsageMetric | None = None
 
-    # Detect if benchmark is of type StartupTimingMetric
-    if "timeToInitialDisplayMs" in metrics_json:
-        bench_data = _parse_startup_timing_metric(data)
-    # Detect if benchmark is of type FrameTimingMetric
-    elif "frameCount" in metrics_json:
-        bench_data = _parse_frame_timing_metric(data)
-    # Detect if benchmark is of type MemoryUsageMetric
-    elif "memoryRssAnonMaxKb" in metrics_json:
-        bench_data = _parse_memory_usage_metric(data)
-    # Detect if benchmark is of type MemoryUsageMetric
-    elif "memoryRssAnonLastKb" in metrics_json:
-        bench_data = _parse_memory_usage_metric(data)
-    else:
+    METRIC_PARSER_MAP = {
+        "timeToInitialDisplayMs": _parse_startup_timing_metric,
+        "frameCount": _parse_frame_timing_metric,
+        "memoryRssAnonMaxKb": _parse_memory_usage_metric,
+        "memoryRssAnonLastKb": _parse_memory_usage_metric,
+    }
+
+    bench_data: StartupTimingMetric | FrameTimingMetric | MemoryUsageMetric | None = None
+    for key, parser in METRIC_PARSER_MAP.items():
+        if key in metrics_json:
+            bench_data = parser(data)
+            break
+
+    if bench_data is None:
         logger.warning(f"unable to detect benchmark '{name}' metric type, skipping")
         return None
 
