@@ -87,12 +87,12 @@ class Metric:
         return self._stdev
 
     def cv(self) -> float:
-        """Calculates the Coefficient of Variation (StDev / Median)."""
+        """Calculates the Coefficient of Variation (StDev / Mean)."""
         if len(self._runs) < 2:
             return float("nan")
-        if self.median() == 0:
+        if self.mean() == 0:
             return float("nan")
-        return self.stdev() / self.median()
+        return self.stdev() / self.mean()
 
 
 @dataclass
