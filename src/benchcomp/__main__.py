@@ -61,6 +61,43 @@ def group_benchmarks_by_name(reports: list[BenchmarkReport]) -> dict[str, list[B
     return benchmarks
 
 
+def get_common_benchmark_pairs(
+    baseline_benchmarks: dict[str, list[Benchmark]] | dict[str, Benchmark],
+    candidate_benchmarks: dict[str, list[Benchmark]] | dict[str, Benchmark]
+) -> tuple[list[str], dict[str, tuple[list[Benchmark], list[Benchmark]]]]:
+    baseline_benchmarks_by_name: dict[str, list[Benchmark]] = {}
+    candidate_benchmarks_by_name: dict[str, list[Benchmark]] = {}
+
+    for name, bench in baseline_benchmarks.items():
+        if isinstance(bench, list):
+            baseline_benchmarks_by_name[name] = bench
+        else:
+            baseline_benchmarks_by_name[name] = [bench]
+
+    for name, bench in candidate_benchmarks.items():
+        if isinstance(bench, list):
+            candidate_benchmarks_by_name[name] = bench
+        else:
+            candidate_benchmarks_by_name[name] = [bench]
+
+    missing_in_baseline: set[str] = candidate_benchmarks_by_name.keys() - baseline_benchmarks_by_name.keys()
+    missing_in_candidate: set[str] = baseline_benchmarks_by_name.keys() - candidate_benchmarks_by_name.keys()
+    if missing_in_candidate:
+        logger.warning(f"Benchmarks present in baseline but missing in candidate: {missing_in_candidate}")
+        print()
+    if missing_in_baseline:
+        logger.warning(f"Benchmarks present in candidate but missing in baseline: {missing_in_baseline}")
+        print()
+
+    common_names: list[str] = list(baseline_benchmarks_by_name.keys() & candidate_benchmarks_by_name.keys())
+    pairs: dict[str, tuple[list[Benchmark], list[Benchmark]]] = {
+        name: (baseline_benchmarks_by_name[name], candidate_benchmarks_by_name[name])
+        for name in common_names
+    }
+
+    return common_names, pairs
+
+
 def main() -> int:
     args = parse_commandline_args()
 
@@ -102,17 +139,13 @@ def main() -> int:
         for i in range(min_len):
             b, c = baseline_reports[i], candidate_reports[i]
             title = f"Comparing Benchmark Run ({i + 1} / {min_len})"
-            common_names = b.benchmarks.keys() & c.benchmarks.keys()
-            # TODO: Check for missing common names
-            pairs = {name: ([b.benchmarks[name]], [c.benchmarks[name]]) for name in common_names}
+            _, pairs = get_common_benchmark_pairs(b.benchmarks, c.benchmarks)
             comparison_groups.append((title, pairs, [b], [c]))
     else:
         title = f"Comparing Benchmark Run (Aggregation: {aggregation_function})"
         b_benchmarks = group_benchmarks_by_name(baseline_reports)
         c_benchmarks = group_benchmarks_by_name(candidate_reports)
-        common_names = b_benchmarks.keys() & c_benchmarks.keys()
-        # TODO: Check for missing common names
-        pairs = {name: (b_benchmarks[name], c_benchmarks[name]) for name in common_names}
+        _, pairs = get_common_benchmark_pairs(b_benchmarks, c_benchmarks)
         comparison_groups.append((title, pairs, baseline_reports, candidate_reports))
 
     analysis_reports: list[AnalysisReport] = []
