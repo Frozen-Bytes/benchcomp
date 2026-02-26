@@ -5,7 +5,7 @@ from pathlib import Path
 
 from benchcomp.common import AnalysisReport, Benchmark, BenchmarkReport
 from benchcomp.compare import COMPARE_METHODS, compare_benchmarks
-from benchcomp.console_renderer import print_file_pair_mapping, print_analysis_reports
+from benchcomp.console_renderer import print_analysis_reports, print_file_pair_mapping
 from benchcomp.parser_cli import parse_commandline_args
 from benchcomp.parser_macrobenchmark import load_macrobenchmark_report
 
@@ -46,7 +46,6 @@ def load_reports(files: list[Path]) -> list[BenchmarkReport]:
                 reports.append(report)
             else:
                 logger.error(f"invalid benchmark report '{f}', skipping.\n")
-            raise OSError("test")
         except OSError:
             logger.exception(f"failed to open file {f} for reading.")
     return reports
@@ -99,21 +98,14 @@ def get_common_benchmark_pairs(
 
 
 def main() -> int:
-    args = parse_commandline_args()
+    conf = parse_commandline_args()
 
-    frame_time_target_ms = args.frametime_target
-    is_verbose = args.verbose
-    aggregation_function = args.aggregate_method
-    thresholds: dict[str, float] = {
-        "stepfit": args.step_fit_threshold,
-        "mannwhitneyu": args.pvalue_threshold,
-    }
-
-    baseline_files = resolve_search_path(args.baseline)
-    candidate_files = resolve_search_path(args.candidate)
+    baseline_files = resolve_search_path(conf.baseline_path)
     if len(baseline_files) <= 0:
         logger.critical('baseline has no Macrobenchmark results')
         return 1
+
+    candidate_files = resolve_search_path(conf.candidate_path)
     if len(candidate_files) <= 0:
         logger.critical('candidate has no Macrobenchmark results')
         return 1
@@ -121,7 +113,7 @@ def main() -> int:
     baseline_reports: list[BenchmarkReport] = load_reports(baseline_files)
     candidate_reports: list[BenchmarkReport] = load_reports(candidate_files)
     comparison_groups = []
-    if args.aggregate_method == "none":
+    if conf.aggregate_function == "none":
         min_len = min(len(baseline_reports), len(candidate_reports))
         if len(baseline_reports) != len(candidate_reports):
             logger.warning(f"length mismatch, using first {min_len} samples. baseline: {len(baseline_reports)}, candidate: {len(candidate_reports)}")
@@ -142,12 +134,13 @@ def main() -> int:
             _, pairs = get_common_benchmark_pairs(b.benchmarks, c.benchmarks)
             comparison_groups.append((title, pairs, [b], [c]))
     else:
-        title = f"Comparing Benchmark Run (Aggregation: {aggregation_function})"
+        title = f"Comparing Benchmark Run (Aggregation: {conf.aggregate_function})"
         b_benchmarks = group_benchmarks_by_name(baseline_reports)
         c_benchmarks = group_benchmarks_by_name(candidate_reports)
         _, pairs = get_common_benchmark_pairs(b_benchmarks, c_benchmarks)
         comparison_groups.append((title, pairs, baseline_reports, candidate_reports))
 
+    thresholds: dict[str, float] = {"stepfit": conf.fit, "mannwhitneyu": conf.alpha}
     analysis_reports: list[AnalysisReport] = []
     for title, benchmark_pairs, b_reps, c_reps in comparison_groups:
         analysis_report = AnalysisReport(title=title, baseline_reports=b_reps, candidate_reports=c_reps)
@@ -158,8 +151,8 @@ def main() -> int:
                     c_list,
                     comparison_method=method,
                     threshold=thresholds[method],
-                    frame_time_target=frame_time_target_ms,
-                    aggregation_function=aggregation_function,
+                    frame_time_target=conf.frame_time_target_ms,
+                    aggregation_function=conf.aggregate_function,
                 )
 
                 if comparison_result:
@@ -169,7 +162,7 @@ def main() -> int:
 
         analysis_reports.append(analysis_report)
 
-    print_analysis_reports(analysis_reports, is_verbose=is_verbose)
+    print_analysis_reports(analysis_reports, is_verbose=conf.is_verbose)
 
     return 0
 

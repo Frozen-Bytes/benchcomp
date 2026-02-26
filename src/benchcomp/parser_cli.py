@@ -1,4 +1,5 @@
 import argparse
+from dataclasses import dataclass
 from pathlib import Path
 
 from benchcomp.__version__ import __version__
@@ -10,8 +11,18 @@ from benchcomp.compare import (
     DEFAULT_STEP_FIT_THRESHOLD,
 )
 
+@dataclass
+class Config:
+    baseline_path: Path
+    candidate_path: Path
+    frame_time_target_ms: float
+    fit: float
+    alpha: float
+    is_verbose: bool
+    aggregate_function: str
 
-def parse_commandline_args() -> argparse.Namespace:
+
+def parse_commandline_args() -> Config:
     parser = argparse.ArgumentParser(
         prog="benchcomp",
         description="Compare between macrobenchmark reports",
@@ -32,7 +43,7 @@ def parse_commandline_args() -> argparse.Namespace:
     # Optional Arguments
     parser.add_argument(
         "--frametime",
-        dest="frametime_target",
+        dest="frame_time_target_ms",
         type=float,
         default=DEFAULT_FRAME_TIME_TARGET_MS,
         metavar="MS",
@@ -40,7 +51,7 @@ def parse_commandline_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--fit",
-        dest="step_fit_threshold",
+        dest="fit",
         type=float,
         default=DEFAULT_STEP_FIT_THRESHOLD,
         metavar="VALUE",
@@ -48,7 +59,7 @@ def parse_commandline_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--alpha",
-        dest="pvalue_threshold",
+        dest="alpha",
         type=float,
         default=DEFAULT_P_VALUE_THRESHOLD,
         metavar="VALUE",
@@ -56,7 +67,7 @@ def parse_commandline_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--aggregate",
-        dest="aggregate_method",
+        dest="aggregate_function",
         type=str,
         metavar="VALUE",
         choices=AGGREGATE_FUNCTIONS.keys(),
@@ -76,4 +87,14 @@ def parse_commandline_args() -> argparse.Namespace:
         version=f"%(prog)s {__version__}",
     )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    return Config(
+        baseline_path=args.baseline,
+        candidate_path=args.candidate,
+        frame_time_target_ms=args.frame_time_target_ms,
+        fit=args.fit,
+        alpha=args.alpha,
+        aggregate_function=args.aggregate_function,
+        is_verbose=args.verbose
+    )
