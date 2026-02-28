@@ -4,16 +4,17 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import Any
 
-from benchcomp.common import (
+from benchcomp.core import (
     Benchmark,
     BenchmarkReport,
     Device,
     FrameTimingMetric,
+    Measurement,
+    MeasurementMetadata,
     MemorySamplingMode,
     MemoryUsageMetric,
-    Metric,
-    MetricMetadata,
-    SampledMetric,
+    MetricBase,
+    SampledMeasurement,
     StartupTimingMetric,
 )
 
@@ -32,18 +33,20 @@ def _parse_device(data: dict[str, Any]) -> Device:
         emulated=True
     )
 
-def _parse_metric(data: dict[str, Any], name: str, name_short: str, unit: str) -> Metric:
-    return Metric(
-        MetricMetadata(
+
+def _parse_measurement(data: dict[str, Any], name: str, name_short: str, unit: str) -> Measurement:
+    return Measurement(
+        MeasurementMetadata(
             name=name,
             name_short=name_short,
             unit=unit,
         ),
-        _runs=data.get("runs", []),
+        runs=data.get("runs", []),
     )
 
-def _parse_sampled_metric(data: dict[str, Any]) -> SampledMetric:
-    return SampledMetric(
+
+def _parse_sampled_measurement(data: dict[str, Any]) -> SampledMeasurement:
+    return SampledMeasurement(
         p50=data.get("P50", 0.0),
         p90=data.get("P90", 0.0),
         p95=data.get("P95", 0.0),
@@ -51,12 +54,13 @@ def _parse_sampled_metric(data: dict[str, Any]) -> SampledMetric:
         runs=data.get("runs", []),
     )
 
+
 def _parse_startup_timing_metric(data: dict[str, Any]) -> StartupTimingMetric | None:
     metrics = data.get("metrics", {})
-    time_to_full_display_ms: Metric | None = None
+    time_to_full_display_ms: Measurement | None = None
 
     if "timeToFullDisplayMs" in metrics:
-        time_to_full_display_ms = _parse_metric(
+        time_to_full_display_ms = _parse_measurement(
             metrics.get("timeToFullDisplayMs"),
             name="Time to Full Display",
             name_short="TFD",
@@ -64,7 +68,7 @@ def _parse_startup_timing_metric(data: dict[str, Any]) -> StartupTimingMetric | 
         )
 
     return StartupTimingMetric(
-        time_to_initial_display_ms=_parse_metric(
+        time_to_initial_display_ms=_parse_measurement(
             metrics["timeToInitialDisplayMs"],
             name="Time to Initial Display",
             name_short="TID",
@@ -73,24 +77,26 @@ def _parse_startup_timing_metric(data: dict[str, Any]) -> StartupTimingMetric | 
         time_to_full_display_ms=time_to_full_display_ms,
     )
 
+
 def _parse_frame_timing_metric(data: dict[str, Any]) -> FrameTimingMetric | None:
     metrics = data.get("metrics", {})
     sampled_metrics = data.get("sampledMetrics", {})
-    frame_overrun_ms: SampledMetric | None = None
+    frame_overrun_ms: SampledMeasurement | None = None
 
     if "frameOverrunMs" in sampled_metrics:
-        frame_overrun_ms = _parse_sampled_metric(sampled_metrics.get("frameOverrunMs"))
+        frame_overrun_ms = _parse_sampled_measurement(sampled_metrics.get("frameOverrunMs"))
 
     return FrameTimingMetric(
-        frame_count=_parse_metric(
+        frame_count=_parse_measurement(
             metrics.get("frameCount", {}),
             name="Frame Count",
             name_short="FC",
             unit=""
         ),
-        frame_duration_ms=_parse_sampled_metric(sampled_metrics.get("frameDurationCpuMs", {})),
+        frame_duration_ms=_parse_sampled_measurement(sampled_metrics.get("frameDurationCpuMs", {})),
         frame_overrun_ms=frame_overrun_ms,
     )
+
 
 def _parse_memory_usage_metric(data: dict[str, Any]) -> MemoryUsageMetric | None:
     metrics = data.get("metrics", {})
@@ -104,10 +110,10 @@ def _parse_memory_usage_metric(data: dict[str, Any]) -> MemoryUsageMetric | None
     mode = MemorySamplingMode.MAX if "memoryRssAnonMaxKb" in metrics else MemorySamplingMode.LAST
     suffix = "MaxKb" if mode == MemorySamplingMode.MAX else "LastKb"
 
-    results: dict[str, Metric] = {}
+    results: dict[str, Measurement] = {}
     for key, full_name, short_name, in METRIC_CONFIGS:
         metric_key = f"{key}{suffix}"
-        results[key] = _parse_metric(
+        results[key] = _parse_measurement(
             metrics.get(metric_key),
             name=f"{full_name} {str(mode.name).title()}",
             name_short=f"{short_name}_{str(mode.name).upper()}",
@@ -125,6 +131,7 @@ def _parse_memory_usage_metric(data: dict[str, Any]) -> MemoryUsageMetric | None
         memory_gpu_kb=results["memoryGpu"],
     )
 
+
 def _parse_benchmark(data: dict[str, Any]) -> Benchmark | None:
     name: str = data.get("name", "")
     metrics_json = data.get("metrics", {})
@@ -136,13 +143,12 @@ def _parse_benchmark(data: dict[str, Any]) -> Benchmark | None:
         "memoryRssAnonLastKb": _parse_memory_usage_metric,
     }
 
-    bench_data: StartupTimingMetric | FrameTimingMetric | MemoryUsageMetric | None = None
+    metrics: list[MetricBase] = []
     for key, parser in METRIC_PARSER_MAP.items():
         if key in metrics_json:
-            bench_data = parser(data)
-            break
+            metrics.append(parser(data))
 
-    if bench_data is None:
+    if not metrics:
         logger.warning(f"unable to detect benchmark '{name}' metric type, skipping")
         return None
 
@@ -152,25 +158,27 @@ def _parse_benchmark(data: dict[str, Any]) -> Benchmark | None:
         total_runtime_ns=data.get("totalRunTimeNs", 0),
         warmup_iterations=data.get("warmupIterations", 0),
         repeat_iterations=data.get("repeatIterations", 0),
-        data=bench_data,
+        metrics=metrics,
     )
 
 
 def parse_macrobenchmark_report(data: dict[str, Any]) -> BenchmarkReport:
-    report: BenchmarkReport = BenchmarkReport()
+    benchmarks_json = data.get("benchmarks", [])
 
-    report.device = _parse_device(data.get("context", {}))
-    benchmarks = data.get("benchmarks", [])
-    for bench_obj in benchmarks:
+    benchmarks: list[Benchmark] = []
+    for bench_obj in benchmarks_json:
         try:
             benchmark = _parse_benchmark(bench_obj)
             if benchmark is not None:
-                report.benchmarks[benchmark.name] = benchmark
+                benchmarks.append(benchmark)
         except Exception as e:
             name = bench_obj.get("name", "")
             logger.warning(f"failed to parse benchmark '{name}', skipping. ({e})")
 
-    return report
+    return BenchmarkReport(
+        device=_parse_device(data.get("context", {})),
+        benchmarks=benchmarks,
+    )
 
 
 def load_macrobenchmark_report(path: Path | str) -> BenchmarkReport | None:

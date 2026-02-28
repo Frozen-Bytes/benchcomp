@@ -3,9 +3,15 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from benchcomp.common import AnalysisReport, Benchmark, BenchmarkReport
-from benchcomp.compare import COMPARE_METHODS, compare_benchmarks
-from benchcomp.console_renderer import print_analysis_reports, print_file_pair_mapping
+from benchcomp.console_renderer import format_analysis_report, print_file_pair_mapping
+from benchcomp.core import (
+    COMPARE_METHODS,
+    AnalysisReport,
+    Benchmark,
+    BenchmarkReport,
+    compare_benchmarks,
+    set_frame_time_target_ms,
+)
 from benchcomp.parser_cli import parse_commandline_args
 from benchcomp.parser_macrobenchmark import load_macrobenchmark_report
 
@@ -51,54 +57,32 @@ def load_reports(files: list[Path]) -> list[BenchmarkReport]:
     return reports
 
 
-def group_benchmarks_by_name(reports: list[BenchmarkReport]) -> dict[str, list[Benchmark]]:
-    """Groups benchmark results by their names across multiple reports."""
-    benchmarks: dict[str, list[Benchmark]] = defaultdict(list)
+def aggregate_benchmarks(
+    reports: list[BenchmarkReport],
+    aggregate_function: str,
+) -> list[Benchmark]:
+    benchmarks_agg: list[Benchmark] = []
+
+    benchmark_by_id: dict[str, list[Benchmark]] = defaultdict(list)
     for report in reports:
-        for name, benchmark in report.benchmarks.items():
-            benchmarks[name].append(benchmark)
-    return benchmarks
+        for bench in report.benchmarks:
+            benchmark_by_id[bench.id].append(bench)
 
+    for benchmarks in benchmark_by_id.values():
+        benchmarks_agg.append(
+            Benchmark.aggregate(
+                benchmarks,
+                aggregate_function
+            )
+        )
 
-def get_common_benchmark_pairs(
-    baseline_benchmarks: dict[str, list[Benchmark]] | dict[str, Benchmark],
-    candidate_benchmarks: dict[str, list[Benchmark]] | dict[str, Benchmark]
-) -> tuple[list[str], dict[str, tuple[list[Benchmark], list[Benchmark]]]]:
-    baseline_benchmarks_by_name: dict[str, list[Benchmark]] = {}
-    candidate_benchmarks_by_name: dict[str, list[Benchmark]] = {}
-
-    for name, bench in baseline_benchmarks.items():
-        if isinstance(bench, list):
-            baseline_benchmarks_by_name[name] = bench
-        else:
-            baseline_benchmarks_by_name[name] = [bench]
-
-    for name, bench in candidate_benchmarks.items():
-        if isinstance(bench, list):
-            candidate_benchmarks_by_name[name] = bench
-        else:
-            candidate_benchmarks_by_name[name] = [bench]
-
-    missing_in_baseline: set[str] = candidate_benchmarks_by_name.keys() - baseline_benchmarks_by_name.keys()
-    missing_in_candidate: set[str] = baseline_benchmarks_by_name.keys() - candidate_benchmarks_by_name.keys()
-    if missing_in_candidate:
-        logger.warning(f"Benchmarks present in baseline but missing in candidate: {missing_in_candidate}")
-        print()
-    if missing_in_baseline:
-        logger.warning(f"Benchmarks present in candidate but missing in baseline: {missing_in_baseline}")
-        print()
-
-    common_names: list[str] = list(baseline_benchmarks_by_name.keys() & candidate_benchmarks_by_name.keys())
-    pairs: dict[str, tuple[list[Benchmark], list[Benchmark]]] = {
-        name: (baseline_benchmarks_by_name[name], candidate_benchmarks_by_name[name])
-        for name in common_names
-    }
-
-    return common_names, pairs
+    return benchmarks_agg
 
 
 def main() -> int:
     conf = parse_commandline_args()
+
+    set_frame_time_target_ms(conf.frame_time_target_ms)
 
     baseline_files = resolve_search_path(conf.baseline_path)
     if len(baseline_files) <= 0:
@@ -112,14 +96,33 @@ def main() -> int:
 
     baseline_reports: list[BenchmarkReport] = load_reports(baseline_files)
     candidate_reports: list[BenchmarkReport] = load_reports(candidate_files)
-    comparison_groups = []
-    if conf.aggregate_function == "none":
+
+    comparison_groups: list[
+        tuple[
+            tuple[list[Benchmark], list[Benchmark]],
+            list[BenchmarkReport],
+            list[BenchmarkReport],
+        ]
+    ] = []
+
+    if conf.aggregate_function:
+        b_benchmarks = aggregate_benchmarks(baseline_reports, conf.aggregate_function)
+        c_benchmarks = aggregate_benchmarks(candidate_reports, conf.aggregate_function)
+        comparison_groups.append(
+            (
+                (b_benchmarks, c_benchmarks),
+                baseline_reports,
+                candidate_reports,
+            )
+        )
+    else:
         min_len = min(len(baseline_reports), len(candidate_reports))
         if len(baseline_reports) != len(candidate_reports):
             logger.warning(f"length mismatch, using first {min_len} samples. baseline: {len(baseline_reports)}, candidate: {len(candidate_reports)}")
 
-        print_file_pair_mapping(baseline_files, candidate_files)
-        print()
+        if min_len > 1:
+            print_file_pair_mapping(baseline_files, candidate_files)
+            print()
 
         mismatch_count = sum(
             b_filepath.name != c_filepath.name
@@ -129,40 +132,44 @@ def main() -> int:
             logger.warning("filename mapping mismatch detected. Output prediction may be incorrect")
 
         for i in range(min_len):
-            b, c = baseline_reports[i], candidate_reports[i]
-            title = f"Comparing Benchmark Run ({i + 1} / {min_len})"
-            _, pairs = get_common_benchmark_pairs(b.benchmarks, c.benchmarks)
-            comparison_groups.append((title, pairs, [b], [c]))
-    else:
-        title = f"Comparing Benchmark Run (Aggregation: {conf.aggregate_function})"
-        b_benchmarks = group_benchmarks_by_name(baseline_reports)
-        c_benchmarks = group_benchmarks_by_name(candidate_reports)
-        _, pairs = get_common_benchmark_pairs(b_benchmarks, c_benchmarks)
-        comparison_groups.append((title, pairs, baseline_reports, candidate_reports))
-
-    thresholds: dict[str, float] = {"stepfit": conf.fit, "mannwhitneyu": conf.alpha}
-    analysis_reports: list[AnalysisReport] = []
-    for title, benchmark_pairs, b_reps, c_reps in comparison_groups:
-        analysis_report = AnalysisReport(title=title, baseline_reports=b_reps, candidate_reports=c_reps)
-        for name, (b_list, c_list) in benchmark_pairs.items():
-            for method, _ in COMPARE_METHODS.items():
-                comparison_result = compare_benchmarks(
-                    b_list,
-                    c_list,
-                    comparison_method=method,
-                    threshold=thresholds[method],
-                    frame_time_target=conf.frame_time_target_ms,
-                    aggregation_function=conf.aggregate_function,
+            comparison_groups.append(
+                (
+                    (baseline_reports[i].benchmarks, candidate_reports[i].benchmarks),
+                    [baseline_reports[i]],
+                    [candidate_reports[i]],
                 )
+            )
 
-                if comparison_result:
-                    analysis_report.comparisons.append(comparison_result)
-                else:
-                    logger.warning(f"failed to compare '{name}' using '{method}' method")
+    compare_methods = conf.methods
+    thresholds = {"stepfit": conf.fit, "mannwhitneyu": conf.alpha}
+    analysis_reports: list[AnalysisReport] = []
+    for benchmark_pairs, b_reports, c_reports in comparison_groups:
+        try:
+            comparisons = compare_benchmarks(
+                a=benchmark_pairs[0],
+                b=benchmark_pairs[1],
+                methods=compare_methods,
+                thresholds=thresholds,
+                measures=conf.measures,
+            )
 
-        analysis_reports.append(analysis_report)
+            report =  AnalysisReport(
+                baseline_reports=b_reports,
+                candidate_reports=c_reports,
+                comparisons=comparisons,
+                methods=[ COMPARE_METHODS[method] for method in compare_methods]
+            )
+            analysis_reports.append(report)
 
-    print_analysis_reports(analysis_reports, is_verbose=conf.is_verbose)
+            if len(report.get_devices()) > 1:
+                logger.warning("multiple device configurations detected in the same patch; benchmark comparison results may be skewed")
+
+        except Exception:
+            benchmark_ids = [bench.id for bench in benchmark_pairs[0]]
+            logger.exception(f"Failed to compare benchmarks pair: {benchmark_ids}")
+
+    for analysis_report in analysis_reports:
+        print(format_analysis_report(analysis_report, is_verbose=conf.is_verbose))
 
     return 0
 
