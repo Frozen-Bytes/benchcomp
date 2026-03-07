@@ -584,13 +584,11 @@ def compare_measurement(
                     a.runs,
                     b.runs,
                     alternative="less",
-                    method="exact",
                 )
                 right_tail_test = mannwhitneyu(
                     a.runs,
                     b.runs,
                     alternative="greater",
-                    method="exact",
                 )
                 if left_tail_test.pvalue < threshold:
                     statistic = left_tail_test.pvalue
