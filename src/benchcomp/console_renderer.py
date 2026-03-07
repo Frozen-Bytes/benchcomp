@@ -1,4 +1,5 @@
 import logging
+import math
 import textwrap
 from pathlib import Path
 
@@ -16,6 +17,10 @@ logger = logging.getLogger(__name__)
 
 def to_sec_from_ns(ns: float | int) -> float:
     return ns / 1_000_000_000.0
+
+
+def _relative_diff(a: float, b: float) -> float:
+    return (b - a) / a if not math.isclose(a, 0.0) else 0.0
 
 
 def _format_device(device: Device) -> str:
@@ -53,8 +58,15 @@ def _format_benchmark_comparison(
 
     for measurement_result in comparison.results:
         lines.append(f"\n  Metric '{measurement_result.metadata.name}' ({measurement_result.metadata.name_short}):")
-        lines.append(f"      Baseline  Runs ({measurement_result.metadata.unit}): [{_format_run(measurement_result.a.runs)}]")
-        lines.append(f"      Candidate Runs ({measurement_result.metadata.unit}): [{_format_run(measurement_result.b.runs)}]")
+        lines.append(f"    Baseline  Runs ({measurement_result.metadata.unit}): [{_format_run(measurement_result.a.runs)}]")
+        lines.append(f"    Candidate Runs ({measurement_result.metadata.unit}): [{_format_run(measurement_result.b.runs)}]")
+
+        change_percent =  [ ]
+        for a, b in zip(measurement_result.a.runs, measurement_result.b.runs):
+            change = (b - a) / a if a != 0 else 0
+            change_percent.append(f"{change:+2.2%}")
+        lines.append(f"    Change             : [{', '.join(change_percent)}]")
+        lines.append(f"    Median             : [{measurement_result.a.median:.3f}, {measurement_result.b.median:.3f}] ({measurement_result.b.median - measurement_result.a.median:+.3f} ~ {_relative_diff(measurement_result.a.median, measurement_result.b.median):+2.2%})")
 
         method_label_width = 0
         for compare_result in measurement_result.result:
@@ -62,7 +74,13 @@ def _format_benchmark_comparison(
 
         for compare_result in measurement_result.result:
             method_str = f"'{compare_result.metadata.name}'"
-            lines.append(f"      Method {method_str:{method_label_width + 2}}: {compare_result.verdict}, {compare_result.metadata.state_label}={compare_result.statistic:.3f}")
+            line = (
+                f"Method {method_str:{method_label_width + 2}}: "
+                f"{compare_result.verdict.name}, "
+                f"{compare_result.metadata.state_label}={compare_result.statistic:.3f}, "
+                f"threshold={comparison.thresholds[compare_result.metadata.id]}"
+            )
+            lines.append(f"    {line}")
 
     return "\n".join(lines)
 
@@ -78,12 +96,14 @@ def _build_summary_table(
         infix: str = "-",
         suffix: str = "",
         unit: str = "",
+        computer_diff: bool = False,
     ) -> str:
         if infix:
             infix = f" {infix} "
         if suffix:
             suffix = f" {suffix}"
-        return f"{a:.3f}{unit}{infix}{unit}{b:.3f}{suffix}"
+        diff_str = f" ({(b - a):+.3f} ~ {_relative_diff(a, b):+2.2%})" if computer_diff else ""
+        return f"{a:.3f}{unit}{infix}{unit}{b:.3f}{suffix}{diff_str}"
 
     def _format_verdict(verdict: Verdict ) -> str:
         return {
@@ -116,9 +136,9 @@ def _build_summary_table(
             b = measurement_result.b
             columns.extend(
                 [
-                    _format_cell(a.median, b.median),
-                    _format_cell(a.min, b.min),
-                    _format_cell(a.max, b.max),
+                    _format_cell(a.median, b.median, computer_diff=True),
+                    # _format_cell(a.min, b.min),
+                    # _format_cell(a.max, b.max),
                     _format_cell(a.stdev, b.stdev),
                     _format_cell(a.cv, b.cv),
                 ]
@@ -135,8 +155,8 @@ def _build_summary_table(
         "Metric",
         "Verdict",
         "Median",
-        "Minimum",
-        "Maximum",
+        # "Minimum",
+        # "Maximum",
         "Standard Deviation",
         "Coefficient of Variance",
     ]

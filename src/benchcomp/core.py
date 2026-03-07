@@ -71,7 +71,7 @@ COMPARE_METHODS: dict[str, CompareFunctionMetadata] = {
     "mannwhitneyu": CompareFunctionMetadata(
         id="mannwhitneyu",
         name="Mann-Whitney U-Test",
-        state_label="pval",
+        state_label="p",
     ),
 }
 
