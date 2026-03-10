@@ -113,12 +113,13 @@ def _parse_memory_usage_metric(data: dict[str, Any]) -> MemoryUsageMetric | None
     results: dict[str, Measurement] = {}
     for key, full_name, short_name, in METRIC_CONFIGS:
         metric_key = f"{key}{suffix}"
-        results[key] = _parse_measurement(
-            metrics.get(metric_key),
-            name=f"{full_name} {str(mode.name).title()}",
-            name_short=f"{short_name}_{str(mode.name).upper()}",
-            unit="Kb",
-        )
+        if metric_key in metrics:
+            results[key] = _parse_measurement(
+                metrics.get(metric_key),
+                name=f"{full_name} {str(mode.name).title()}",
+                name_short=f"{short_name}_{str(mode.name).upper()}",
+                unit="Kb",
+            )
 
     if any(results[k] is None for k in ["memoryRssAnon", "memoryRssFile", "memoryHeapSize"]):
             return None
@@ -128,7 +129,7 @@ def _parse_memory_usage_metric(data: dict[str, Any]) -> MemoryUsageMetric | None
         memory_rss_anon_kb=results["memoryRssAnon"],
         memory_rss_file_kb=results["memoryRssFile"],
         memory_heap_size_kb=results["memoryHeapSize"],
-        memory_gpu_kb=results["memoryGpu"],
+        memory_gpu_kb=results.get("memoryGpu"),
     )
 
 
