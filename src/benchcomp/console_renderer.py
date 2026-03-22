@@ -234,8 +234,11 @@ def format_analysis_report(report: AnalysisReport, is_verbose: bool = False) -> 
 
 def print_file_pair_mapping(baseline: list[Path], candidate: list[Path]) -> None:
     def relative_diff_paths(a: Path, b: Path) -> tuple[str, str]:
-        a_parts = a.resolve().parts
-        b_parts = b.resolve().parts
+        a_abs = a.resolve()
+        b_abs = b.resolve()
+
+        a_parts = a_abs.parts
+        b_parts = b_abs.parts
 
         common_prefix_len = 0
         for x, y in zip(a_parts, b_parts):
@@ -249,8 +252,8 @@ def print_file_pair_mapping(baseline: list[Path], candidate: list[Path]) -> None
 
         common_root = Path(*a_parts[:common_prefix_len])
         return (
-            str(a.relative_to(common_root)),
-            str(b.relative_to(common_root)),
+            str(a_abs.relative_to(common_root)),
+            str(b_abs.relative_to(common_root)),
         )
 
     title: str = "Macrobenchmark Report File Mapping"
