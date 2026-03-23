@@ -211,6 +211,9 @@ def format_analysis_report(report: AnalysisReport, is_verbose: bool = False) -> 
             total_runtime_s += to_sec_from_ns(compariosn.b.total_runtime_ns)
 
         for comparison in report.comparisons:
+            if not comparison.results:
+                continue
+
             lines.append("")
             lines.append(
                 _format_benchmark_comparison(
