@@ -56,7 +56,7 @@ def parse_commandline_args() -> Config:
     )
 
     measures_group = parser.add_argument_group(
-        "measures Options",
+        "measures options",
         "options related to benchmark metric measures",
     )
     measures_group.add_argument(
@@ -98,7 +98,7 @@ def parse_commandline_args() -> Config:
     )
 
     comp_method_group = parser.add_argument_group(
-        "compare Options",
+        "compare options",
         "options related to compare methods",
     )
     comp_method_group.add_argument(
