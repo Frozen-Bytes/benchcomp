@@ -20,7 +20,7 @@ def to_sec_from_ns(ns: float | int) -> float:
 
 
 def _relative_diff(a: float, b: float) -> float:
-    return (b - a) / a if not math.isclose(a, 0.0) else 0.0
+    return (b - a) / a if not math.isclose(a, 0.0) else math.inf
 
 
 def _format_device(device: Device) -> str:
@@ -61,10 +61,7 @@ def _format_benchmark_comparison(
         lines.append(f"    Baseline  Runs ({measurement_result.metadata.unit}): [{_format_run(measurement_result.a.runs)}]")
         lines.append(f"    Candidate Runs ({measurement_result.metadata.unit}): [{_format_run(measurement_result.b.runs)}]")
 
-        change_percent =  [ ]
-        for a, b in zip(measurement_result.a.runs, measurement_result.b.runs):
-            change = (b - a) / a if a != 0 else 0
-            change_percent.append(f"{change:+2.2%}")
+        change_percent = [ f"{_relative_diff(a, b):+2.2%}" for a, b in zip(measurement_result.a.runs, measurement_result.b.runs) ]
         lines.append(f"    Change             : [{', '.join(change_percent)}]")
         lines.append(f"    Median             : [{measurement_result.a.median:.3f}, {measurement_result.b.median:.3f}] ({measurement_result.b.median - measurement_result.a.median:+.3f} ~ {_relative_diff(measurement_result.a.median, measurement_result.b.median):+2.2%})")
 
