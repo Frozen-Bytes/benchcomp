@@ -12,6 +12,7 @@ from benchcomp.core import (
     compare_benchmarks,
     set_frame_time_target_ms,
 )
+from benchcomp.json_serializer import json_write_analysis_report
 from benchcomp.parser_cli import parse_commandline_args
 from benchcomp.parser_macrobenchmark import load_macrobenchmark_report
 
@@ -170,6 +171,13 @@ def main() -> int:
 
     for analysis_report in analysis_reports:
         print(format_analysis_report(analysis_report, is_verbose=conf.is_verbose))
+
+    if conf.output_path:
+        if len(analysis_reports) == 1:
+            with open(conf.output_path, "w") as f:
+                f.write(json_write_analysis_report(analysis_reports[0]))
+        else:
+            logger.error("file output does not support writing multiple analysis reports at once")
 
     return 0
 

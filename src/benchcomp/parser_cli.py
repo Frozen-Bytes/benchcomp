@@ -24,6 +24,7 @@ DEFAULT_METHOD: str = "mannwhitneyu"
 class Config:
     baseline_path: Path
     candidate_path: Path
+    output_path: Path | None
     frame_time_target_ms: float
     fit: float
     alpha: float
@@ -154,11 +155,21 @@ def parse_commandline_args() -> Config:
         version=f"%(prog)s {__version__}",
     )
 
+    parser.add_argument(
+        "-o",
+        "--out",
+        dest="out",
+        type=Path,
+        metavar="OUT",
+        help="path to output file"
+    )
+
     args = parser.parse_args()
 
     return Config(
         baseline_path=args.baseline,
         candidate_path=args.candidate,
+        output_path=args.out,
         frame_time_target_ms=args.frame_time_target_ms,
         fit=args.fit,
         alpha=args.alpha,

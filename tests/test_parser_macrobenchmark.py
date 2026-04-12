@@ -50,8 +50,13 @@ def test_parse_device_basic():
     assert device.name == "generic_x86_64_arm64"
     assert device.model == "sdk_gphone_x86_64"
     assert device.cpu_cores == 2
-    assert device.mem_size_mb == 4_120_588_288 // (1024 * 1024)
+    assert device.cpu_freq == 2000
+    assert device.cpu_locked
+    assert device.mem_size_bytes == 4_120_588_288
+    assert device.mem_size_mb == 4_120_588_288 // (1000 * 1000)
     assert device.emulated is True
+    assert device.sdk == 30
+    assert device.sdk_codename == "REL"
 
 
 def test_metric():

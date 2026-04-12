@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 def _parse_device(data: dict[str, Any]) -> Device:
     build = data.get("build", {})
+    version = build.get("version", {})
 
     return Device(
         brand = build.get("brand", ""),
@@ -29,8 +30,11 @@ def _parse_device(data: dict[str, Any]) -> Device:
         model = build.get("model", ""),
         cpu_cores = data.get("cpuCoreCount", 0),
         cpu_freq = data.get("cpuMaxFreqHz", 0),
-        mem_size_mb = data.get("memTotalBytes", 0) // (1024 * 1024),
-        emulated=True
+        cpu_locked = data.get("cpuLocked", True),
+        mem_size_bytes = data.get("memTotalBytes", 0),
+        emulated=True,
+        sdk = version.get("sdk", 0),
+        sdk_codename = version.get("codename", ""),
     )
 
 

@@ -423,10 +423,17 @@ class Device:
     brand: str = ""
     name: str = ""
     model: str = ""
+    sdk: int = 0
+    sdk_codename: str = ""
     cpu_cores: int = 0
     cpu_freq: int = 0
-    mem_size_mb: int = 0
+    cpu_locked: bool = True
+    mem_size_bytes: int = 0
     emulated: bool = True
+
+    @property
+    def mem_size_mb(self) -> int:
+        return self.mem_size_bytes // (1000 * 1000)
 
 
 @dataclass
