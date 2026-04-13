@@ -9,8 +9,8 @@ from enum import Enum
 from functools import cached_property
 from itertools import chain
 from pathlib import Path
-from statistics import mean, median, stdev
-from typing import Callable, Self, cast
+from statistics import StatisticsError, mean, median, stdev
+from typing import Callable, Iterable, Self, cast
 
 from scipy.stats import mannwhitneyu
 
@@ -75,6 +75,34 @@ COMPARE_METHODS: dict[str, CompareFunctionMetadata] = {
     ),
 }
 
+def trimedian(data: Iterable[float]) -> list[float]:
+    sorted_values = sorted(data)
+    n = len(sorted_values)
+
+    if n == 0:
+        raise StatisticsError("no median for empty data")
+
+    if n < 3:
+        return sorted_values
+
+    mid = n // 2
+    if n % 2 == 1:
+        # Odd: clear middle index
+        return [sorted_values[mid - 1], sorted_values[mid], sorted_values[mid + 1]]
+    else:
+        # Even: median falls between two middle values, take the surrounding triplet
+        median_val: float = (sorted_values[mid - 1] + sorted_values[mid]) / 2
+        return [sorted_values[mid - 1], median_val, sorted_values[mid]]
+
+
+def trimedian_aggregation(runs: list[list[float]]) -> list[float]:
+    result: list[float] = []
+    for run in runs:
+        medians = trimedian(run)
+        for m in medians:
+            result.append(m)
+    return result
+
 
 AggregateFunc = Callable[[list[list[float]]], list[float]]
 AGGREGATE_FUNCTIONS: dict[str, AggregateFunc] = {
@@ -83,6 +111,7 @@ AGGREGATE_FUNCTIONS: dict[str, AggregateFunc] = {
     "max": lambda runs: [max(run) for run in runs],
     "median": lambda runs: [median(run) for run in runs],
     "mean": lambda runs: [mean(run) for run in runs],
+    "trimedian": trimedian_aggregation,
 }
 
 
