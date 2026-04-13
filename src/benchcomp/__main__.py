@@ -98,6 +98,9 @@ def main() -> int:
     baseline_reports: list[BenchmarkReport] = load_reports(baseline_files)
     candidate_reports: list[BenchmarkReport] = load_reports(candidate_files)
 
+    for r in (baseline_reports + candidate_reports):
+        r.device.alias = conf.device_alias
+
     comparison_groups: list[
         tuple[
             tuple[list[Benchmark], list[Benchmark]],

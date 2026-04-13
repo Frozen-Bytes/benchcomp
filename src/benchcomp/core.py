@@ -422,6 +422,7 @@ class Benchmark:
 class Device:
     brand: str = ""
     name: str = ""
+    alias: str = ""
     model: str = ""
     sdk: int = 0
     sdk_codename: str = ""

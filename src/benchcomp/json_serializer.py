@@ -17,6 +17,7 @@ def _json_write_device(obj: Device) -> dict[str, Any]:
     root["brand"] = obj.brand
     root["model"] = obj.model
     root["device"] = obj.name
+    root["alias"] = obj.alias
     root["cpuCoreCount"] = obj.cpu_cores
     root["cpuLocked"] = obj.cpu_locked
     root["cpuMaxFreqHz"] = obj.cpu_freq

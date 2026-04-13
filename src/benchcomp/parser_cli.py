@@ -32,6 +32,7 @@ class Config:
     measures: set[str]
     methods: set[str]
     aggregate_function: str | None
+    device_alias: str
 
 
 def parse_commandline_args() -> Config:
@@ -163,6 +164,14 @@ def parse_commandline_args() -> Config:
         metavar="OUT",
         help="path to output file"
     )
+    parser.add_argument(
+        "--device-alias",
+        dest="device_alias",
+        type=str,
+        metavar="ALIAS",
+        default="",
+        help="attach an alias to the device identifier",
+    )
 
     args = parser.parse_args()
 
@@ -177,4 +186,5 @@ def parse_commandline_args() -> Config:
         measures=set(MEASURES) if args.do_all_measures else args.measures,
         methods=set(COMPARE_METHODS.keys()) if args.do_all_methods else args.methods,
         is_verbose=args.verbose,
+        device_alias=args.device_alias,
     )
